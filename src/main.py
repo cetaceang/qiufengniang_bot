@@ -3,6 +3,7 @@
 import os
 import asyncio
 import logging
+import sys
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -12,12 +13,32 @@ from . import config
 from .utils.database import db_manager
 
 def setup_logging():
-    """配置日志记录器"""
-    logging.basicConfig(
-        level=config.LOG_LEVEL,
-        format=config.LOG_FORMAT,
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
+    """
+    配置日志记录器，实现优雅的日志分离：
+    - INFO 和 DEBUG 级别的日志输出到 stdout (标准输出)。
+    - WARNING, ERROR, CRITICAL 级别的日志输出到 stderr (标准错误)。
+    """
+    # 1. 创建一个统一的格式化器
+    log_formatter = logging.Formatter(config.LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S")
+
+    # 2. 创建一个专门处理 INFO 和 DEBUG 级别日志的处理器，并输出到 stdout
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setFormatter(log_formatter)
+    # 添加一个过滤器，只允许低于 WARNING 级别的日志通过
+    stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+
+    # 3. 创建一个专门处理 WARNING 及以上级别日志的处理器，并输出到 stderr
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(log_formatter)
+
+    # 4. 获取根 logger，并为其添加我们创建的两个处理器
+    # 注意：我们不再使用 logging.basicConfig()，因为它会添加自己的默认处理器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(config.LOG_LEVEL) # 设置根 logger 的最低响应级别
+    root_logger.handlers.clear() # 清除任何可能由其他库（如 discord.py）添加的旧处理器
+    root_logger.addHandler(stdout_handler)
+    root_logger.addHandler(stderr_handler)
 
 class GuidanceBot(commands.Bot):
     """机器人类，继承自 commands.Bot"""
