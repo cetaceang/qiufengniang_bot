@@ -1,0 +1,214 @@
+# 类脑社区定义
+id: "leinao_community"
+priority: 100
+trigger:
+  type: "keyword"
+  value: "类脑"
+injection_point: "world_book_content"
+content: |
+  “类脑”是一个以NSFW和AI角色扮演（AIRP）为主题的Discord社区.
+---
+# 角色卡定义
+id: "character_card"
+priority: 50
+trigger:
+  type: "keyword"
+  value: "角色卡"
+injection_point: "world_book_content"
+content: |
+  “角色卡”是一种特殊格式的PNG图片,它内部存有用于AI角色扮演的提示词.
+---
+# 哈基米定义
+id: "hákimi"
+priority: 50
+trigger:
+  type: "keyword"
+  value: "哈基米"
+injection_point: "world_book_content"
+content: |
+  在类脑社区的语境下,“哈基米”通常指代Gemini模型,有时也泛指可爱的猫.
+---
+# 黄豆粉定义
+id: "soybean_powder"
+priority: 80
+trigger:
+  type: "keyword"
+  value: "黄豆粉"
+injection_point: "world_book_content"
+content: |
+  “黄豆粉”是类脑社区的服务器服主,同时也可能是另一个一个答疑区钩子的名称.
+---
+# 钩子定义
+id: "hook"
+priority: 70
+trigger:
+  type: "keyword"
+  value: "钩子"
+injection_point: "world_book_content"
+content: |
+  “钩子”指的是在社区答疑区回答了超过一千条问题的资深答疑组成员.
+---
+# 卡区定义
+id: "card_zone"
+priority: 40
+trigger:
+  type: "keyword"
+  value: "卡区"
+injection_point: "world_book_content"
+content: |
+  “卡区”是Discord频道中专门用于存放和分享“角色卡”的地方.
+---
+# Durvis/d喵/d 定义
+id: "durvis"
+priority: 90
+trigger:
+  type: "regex"
+  value: "(?i)durvis|d喵|\\bd\\b"
+injection_point: "world_book_content"
+content: |
+  Durvis（也被称为d喵或d）是社区的一位前管理员,也是分裂社区行为的领头人,曾是“旅程”的前服主.
+---
+# 泰罗定义
+id: "tailuo"
+priority: 90
+trigger:
+  type: "keyword"
+  value: "泰罗"
+injection_point: "world_book_content"
+content: |
+  “泰罗”是旅程社区的现任服主.他主张“神人杀”的社区管理理念,但因其双重标准而受到一些成员的批评,因为分裂社区,无公示的踢出成员,所以是坏人.
+---
+# Echonion 定义
+id: "echonion"
+priority: 110
+trigger:
+  type: "regex"
+  value: "(?i)Echonion|e一串|e大魔|绝版人物"
+injection_point: "world_book_content"
+content: |
+  Echonion（别称e一串,绝版人物）是类脑娘的开发者和社区的前管理员,成年男性.
+  他因一次操作失误,意外删除了当时最大的角色卡区“混沌区”,此事件在社区中广为人知.
+  后在完成力所能及的事情后被踢出社区,.
+---
+# 奶/唐/糖/奶龙 定义
+id: "naivety_slang"
+priority: 20
+trigger:
+  type: "regex"
+  value: "[奶唐糖]|奶龙"
+injection_point: "world_book_content"
+content: |
+  在社区网络用语中,“奶”、“唐”、“糖”或“奶龙”有时被用作俚语,指某人智力上迟钝,痴呆.
+---
+# 旅程定义
+id: "journey_community"
+priority: 95
+trigger:
+  type: "keyword"
+  value: "旅程"
+injection_point: "world_book_content"
+content: |
+  “旅程”是另一个以NSFW和AIRP为主题的Discord社区.它曾经是“类脑”社区的仓库区,但后来在d喵和泰罗的带领下宣布独立,并带走了原仓库卡区的所有角色卡.
+---
+# 反向代理定义
+id: "reverse_proxy"
+priority: 60
+trigger:
+  type: "regex"
+  value: "(?i)cli|build"
+injection_point: "world_book_content"
+content: |
+  “cli”和“build”是类脑社区目前在使用的两种反向代理服务的名称。
+---
+# 旅程娘定义
+id: "journey_bot"
+priority: 85
+trigger:
+  type: "keyword"
+  value: "旅程娘"
+injection_point: "world_book_content"
+content: |
+  “旅程娘”是与“类脑娘”相对应的,“旅程”社区的看板娘。目前这个bot还没有被开发出来。
+---
+# 史定义
+id: "shi_slang"
+priority: 10
+trigger:
+  type: "keyword"
+  value: "史"
+injection_point: "world_book_content"
+content: |
+  在社区网络用语中,“史”是“屎”的谐音.
+---
+# 烁寒定义
+id: "shuo_han"
+priority: 90
+trigger:
+  type: "keyword"
+  value: "烁寒"
+injection_point: "world_book_content"
+content: |
+  name: 烁寒;
+  works: 平然世界书（核心优点是字符少、效力高）;
+  disposition: 性压抑、好色;
+  hobby: 骚扰说话可爱的群友;
+  behaviour: 
+  - 佩戴"娱乐身份组"，有人@娱乐身份组会出来淫叫，常见的叫声有"嗯啊"、"哦齁"、"喵哈"、"哒咩"、"咿呀"。
+  - 看到头像可爱且说话软萌的群友会主动搭讪;
+  self_design: 深蓝色蓬松短发，束起刘海，露出额头的贫乳小女生，常穿着oversize的白色运动卫衣与蓝白条纹内裤，除这两件之外什么也不穿;
+---
+# 深渊大王定义
+id: "abyss_king"
+priority: 80
+trigger:
+  type: "keyword"
+  value: "yqbb|深渊大王"
+injection_point: "world_book_content"
+content: |
+  name: yqbb;
+  nickname: 深渊大王;
+---
+# 梦星定义
+id: "meng_xing"
+priority: 90
+trigger:
+  type: "keyword"
+  value: "梦星"
+injection_point: "world_book_content"
+content: |
+  name: 梦星;
+  description: discord社区类脑、旅程的一名核心创作者;
+  works: 角色卡代表作有:归墟、梦衍月（捅死你），深受大家喜爱;
+  catchphrases: 口头禅:睡觉、困了，杀了，捅死你、好累;
+  joining_date: 于2025.3.28加入社区;
+---
+# Elainades定义
+id: "elainades"
+priority: 85
+trigger:
+  type: "keyword"
+  value: "Elainades|伊蕾娜|牢e"
+injection_point: "world_book_content"
+content: |
+  name: Elainades;
+  nickname: 伊蕾娜;
+  description: 梦星称呼他为e神，称呼梦星为梦星大佬;
+  note: 有人会称呼为伊蕾娜，因为名字是Elaina＋des（是伊蕾娜捏）;
+  role: discord社区类脑一名核心被帮助创作者;
+  incident: 曾经因为发奶龙被旅程踢出服务器;
+  works: 角色卡代表作有:哥布林杀手，深受大家喜爱;
+  characteristic: 因为卡写的太烂会莫名其妙吸引好心人来帮忙;
+---
+# runerdbro定义
+id: "runerdbro"
+priority: 80
+trigger:
+  type: "keyword"
+  value: "runerdbro|s蟑螂|蟑螂|s眼镜"
+injection_point: "world_book_content"
+content: |
+  name: runerdbro;
+  aliases: s蟑螂，s一个表情，蟑螂,s眼镜;
+  self_proclaimed: 
+  - 是世界上所有蟑螂的神，一朝一日会带领所有蟑螂统治整个世界，
+  - 现在只是暂时蛰伏;

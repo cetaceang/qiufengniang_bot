@@ -8,6 +8,10 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+# 在所有其他导入之前，尽早加载环境变量
+# 这样可以确保所有模块在加载时都能访问到 .env 文件中定义的配置
+load_dotenv()
+
 # 从我们自己的模块中导入
 from . import config
 from .utils.database import db_manager
@@ -33,7 +37,6 @@ def setup_logging():
     stderr_handler.setFormatter(log_formatter)
 
     # 4. 获取根 logger，并为其添加我们创建的两个处理器
-    # 注意：我们不再使用 logging.basicConfig()，因为它会添加自己的默认处理器
     root_logger = logging.getLogger()
     root_logger.setLevel(config.LOG_LEVEL) # 设置根 logger 的最低响应级别
     root_logger.handlers.clear() # 清除任何可能由其他库（如 discord.py）添加的旧处理器
@@ -76,6 +79,7 @@ class GuidanceBot(commands.Bot):
             os.makedirs(cogs_dir)
             log.warning("Cogs 目录不存在，已自动创建。")
 
+        # 加载主cogs目录下的所有Cog
         for filename in os.listdir(cogs_dir):
             if filename.endswith('.py') and not filename.startswith('__'):
                 # load_extension 使用点号分隔的 Python 模块路径
@@ -88,6 +92,48 @@ class GuidanceBot(commands.Bot):
                 except Exception as e:
                     log.error(f"加载模块 {cog_name} 失败: {e}", exc_info=True)
         
+        # 自动加载 games/cogs 目录下的所有Cog
+        games_cogs_dir = os.path.join(os.path.dirname(__file__), 'games', 'cogs')
+        if os.path.exists(games_cogs_dir):
+            for filename in os.listdir(games_cogs_dir):
+                if filename.endswith('.py') and not filename.startswith('__'):
+                    cog_name = f'src.games.cogs.{filename[:-3]}'
+                    try:
+                        await self.load_extension(cog_name)
+                        log.info(f"成功加载模块: {cog_name}")
+                    except Exception as e:
+                        log.error(f"加载模块 {cog_name} 失败: {e}", exc_info=True)
+        else:
+            log.warning("Games Cogs 目录不存在。")
+
+        # 自动加载 odysseia_coin/cogs 目录下的所有Cog
+        odysseia_cogs_dir = os.path.join(os.path.dirname(__file__), 'odysseia_coin', 'cogs')
+        if os.path.exists(odysseia_cogs_dir):
+            for filename in os.listdir(odysseia_cogs_dir):
+                if filename.endswith('.py') and not filename.startswith('__'):
+                    cog_name = f'src.odysseia_coin.cogs.{filename[:-3]}'
+                    try:
+                        await self.load_extension(cog_name)
+                        log.info(f"成功加载模块: {cog_name}")
+                    except Exception as e:
+                        log.error(f"加载模块 {cog_name} 失败: {e}", exc_info=True)
+        else:
+            log.warning("Odysseia Coin Cogs 目录不存在。")
+
+        # 自动加载 affection/cogs 目录下的所有Cog
+        affection_cogs_dir = os.path.join(os.path.dirname(__file__), 'affection', 'cogs')
+        if os.path.exists(affection_cogs_dir):
+            for filename in os.listdir(affection_cogs_dir):
+                if filename.endswith('.py') and not filename.startswith('__'):
+                    cog_name = f'src.affection.cogs.{filename[:-3]}'
+                    try:
+                        await self.load_extension(cog_name)
+                        log.info(f"成功加载模块: {cog_name}")
+                    except Exception as e:
+                        log.error(f"加载模块 {cog_name} 失败: {e}", exc_info=True)
+        else:
+            log.warning("Affection Cogs 目录不存在。")
+
         log.info("--- 所有模块加载完毕 ---")
 
     async def on_ready(self):
@@ -116,25 +162,27 @@ class GuidanceBot(commands.Bot):
         # 最终的、正确的命令同步逻辑
         if config.GUILD_ID:
             # 开发模式：使用 copy_global_to 实现快速同步，并执行一次性全局清理
-            guild = discord.Object(id=int(config.GUILD_ID))
-            try:
-                # 1. 将所有全局命令定义复制到开发服务器，准备进行覆盖式同步（快速）
-                log.info(f"检测到开发服务器 ID: {config.GUILD_ID}。正在准备快速同步...")
-                self.tree.copy_global_to(guild=guild)
-                
-                # 2. 同步开发服务器的命令
-                # 这会清除该服务器上所有不由当前机器人代码定义的旧命令，并注册新命令。
-                synced_commands = await self.tree.sync(guild=guild)
-                log.info(f"已成功同步 {len(synced_commands)} 个命令到开发服务器 {config.GUILD_ID}。")
+            guild_ids = [int(gid.strip()) for gid in config.GUILD_ID.split(',')]
+            for guild_id in guild_ids:
+                guild = discord.Object(id=guild_id)
+                try:
+                    # 1. 将所有全局命令定义复制到开发服务器，准备进行覆盖式同步（快速）
+                    log.info(f"检测到开发服务器 ID: {guild_id}。正在准备快速同步...")
+                    self.tree.copy_global_to(guild=guild)
+                    
+                    # 2. 同步开发服务器的命令
+                    # 这会清除该服务器上所有不由当前机器人代码定义的旧命令，并注册新命令。
+                    synced_commands = await self.tree.sync(guild=guild)
+                    log.info(f"已成功同步 {len(synced_commands)} 个命令到开发服务器 {guild_id}。")
 
-                # 3. 执行一次性全局命令清理，彻底移除旧的、缓存的全局命令
-                log.info("正在执行一次性全局命令清理...")
-                self.tree.clear_commands(guild=None)
-                await self.tree.sync(guild=None)
-                log.info("全局命令清理完成。所有旧命令应已彻底移除。")
-
-            except Exception as e:
-                log.error(f"为开发服务器同步命令时出错: {e}", exc_info=True)
+                except Exception as e:
+                    log.error(f"为开发服务器 {guild_id} 同步命令时出错: {e}", exc_info=True)
+            
+            # 3. 执行一次性全局命令清理，彻底移除旧的、缓存的全局命令
+            log.info("正在执行一次性全局命令清理...")
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync(guild=None)
+            log.info("全局命令清理完成。所有旧命令应已彻底移除。")
         else:
             # 生产模式：只进行标准的全局同步
             log.warning("未设置 GUILD_ID，将进行全局命令同步（可能需要一小时生效）。")
@@ -149,17 +197,13 @@ class GuidanceBot(commands.Bot):
 
 async def main():
     """主函数，用于设置和运行机器人"""
-    # 1. 加载 .env 文件中的环境变量
-    load_dotenv()
-
-    # 2. 配置日志
+    # 1. 配置日志
     setup_logging()
     log = logging.getLogger(__name__)
 
-    # 3. 初始化数据库
-    log.info("正在初始化数据库...")
-    db_manager.init_database()
-    log.info("数据库初始化完成。")
+    # 3. 异步初始化数据库
+    log.info("正在异步初始化数据库...")
+    await db_manager.init_async()
 
     # 4. 创建并运行机器人实例
     bot = GuidanceBot()
@@ -178,7 +222,7 @@ async def main():
         log.critical(f"启动机器人时发生未知错误: {e}", exc_info=True)
     finally:
         # 在机器人关闭时，确保数据库连接被关闭
-        db_manager.close()
+        await db_manager.close()
         log.info("机器人已下线，数据库连接已关闭。")
 
 

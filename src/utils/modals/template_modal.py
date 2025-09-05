@@ -57,6 +57,12 @@ class TemplateModal(Modal):
             default=embed_data.get("image_url"),
             required=False
         ))
+        self.add_item(TextInput(
+            label="Embed 缩略图 URL",
+            placeholder="可选，在卡片右上角显示的小图URL。留空则默认使用服务器头像。",
+            default=embed_data.get("thumbnail_url"),
+            required=False
+        ))
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -67,6 +73,7 @@ class TemplateModal(Modal):
         # author_text 已移除，调整索引
         footer_text = self.children[2].value
         image_url = self.children[3].value
+        thumbnail_url = self.children[4].value
 
         # 构建 embed 数据字典
         # 注意：颜色字段暂时移除，以容纳其他更重要的字段
@@ -75,11 +82,12 @@ class TemplateModal(Modal):
             "description": description,
             "footer_text": footer_text,
             "image_url": image_url,
+            "thumbnail_url": thumbnail_url,
         }
 
         try:
             # 将字典转换为 JSON 字符串存入数据库
-            db_manager.set_message_template(
+            await db_manager.set_message_template(
                 guild_id=interaction.guild_id,
                 template_name=self.template_name,
                 template_data=embed_data

@@ -19,21 +19,30 @@ class MessageTemplatesView(View):
         super().__init__(timeout=180)
         self.main_interaction = main_interaction
         self.guild_id = main_interaction.guild.id
+        self.templates = {}
         
-        self.add_item(BackButton())
-        self.populate_buttons()
+        # BackButton 将在 populate_buttons 的末尾被添加
 
-    def populate_buttons(self):
-        """动态添加模板编辑按钮"""
-        for item in self.children[:]:
-            if isinstance(item, TemplateEditButton):
-                self.remove_item(item)
+    async def async_init(self):
+        """异步加载数据并填充视图。"""
+        await self.populate_buttons()
+        return self
 
-        self.templates = db_manager.get_all_message_templates(self.guild_id)
-        row = 1
-        for name, details in config.TEMPLATE_TYPES.items():
+    async def populate_buttons(self):
+        """动态添加模板编辑按钮，并确保返回按钮在最后。"""
+        # 清空所有旧的按钮
+        self.clear_items()
+
+        self.templates = await db_manager.get_all_message_templates(self.guild_id)
+        
+        # 添加模板编辑按钮，将它们成对排列以节省空间
+        for i, (name, details) in enumerate(config.TEMPLATE_TYPES.items()):
             is_set = self.templates.get(name) is not None
             style = discord.ButtonStyle.success if is_set else discord.ButtonStyle.secondary
+            
+            # 计算行号，每行最多2个按钮
+            row = i // 2
+
             self.add_item(TemplateEditButton(
                 template_name=name,
                 label=details["label"],
@@ -41,10 +50,12 @@ class MessageTemplatesView(View):
                 emoji=details["emoji"],
                 row=row
             ))
-            row += 1
 
-    @staticmethod
-    def get_embed(guild: discord.Guild, templates: dict) -> discord.Embed:
+        # 在所有模板按钮之后添加返回按钮，确保它在安全的新一行
+        # 5个模板会占用 0, 1, 2 行。所以返回按钮放在第 3 行是安全的。
+        self.add_item(BackButton(row=3))
+
+    def get_embed(self) -> discord.Embed:
         """生成消息模板配置的 Embed"""
         embed = discord.Embed(
             title="📝 消息模板配置",
@@ -52,12 +63,8 @@ class MessageTemplatesView(View):
             color=config.EMBED_COLOR_INFO
         )
         
-        templates_to_show = {
-            "welcome_message": config.TEMPLATE_TYPES["welcome_message"],
-            "final_message": config.TEMPLATE_TYPES["final_message"]
-        }
-        for name, details in templates_to_show.items():
-            status = "✅ 已设置" if templates.get(name) else "❌ 未设置"
+        for name, details in config.TEMPLATE_TYPES.items():
+            status = "✅ 已设置" if self.templates.get(name) else "❌ 未设置"
             embed.add_field(name=f"{details['emoji']} {details['label']}", value=f"状态: {status}\n{details['description']}", inline=False)
             
         return embed
@@ -66,8 +73,8 @@ class MessageTemplatesView(View):
         """
         刷新视图以显示最新状态。
         """
-        self.populate_buttons()
-        embed = self.get_embed(self.main_interaction.guild, self.templates)
+        await self.populate_buttons()
+        embed = self.get_embed()
         await self.main_interaction.edit_original_response(embed=embed, view=self)
 
 
@@ -78,24 +85,46 @@ class TemplateEditButton(Button):
         self.template_name = template_name
 
     async def callback(self, interaction: discord.Interaction):
-        """打开模板编辑模态框"""
-        # 延迟导入以避免循环依赖
-        from ..modals.template_modal import TemplateModal
+        """根据模板类型打开不同的编辑视图。"""
+        template_info = config.TEMPLATE_TYPES.get(self.template_name, {})
+        is_multiple = template_info.get("multiple", False)
         
-        current_template = db_manager.get_message_template(interaction.guild_id, self.template_name)
-        modal = TemplateModal(
-            template_name=self.template_name,
-            current_data=current_template,
-            parent_view=self.view
-        )
-        try:
-            await interaction.response.send_modal(modal)
-        except discord.NotFound:
-            # 这通常发生在原始交互已超时的情况下
+        current_template = await db_manager.get_message_template(interaction.guild_id, self.template_name)
+
+        if is_multiple:
+            # 启动支持多消息的编辑视图
+            from .template_message_editor import TemplateMessagesEditView
+            
+            edit_view = TemplateMessagesEditView(
+                parent_interaction=interaction,
+                main_view=self.view, # 传递主视图的引用
+                template_name=self.template_name,
+                existing_data=current_template
+            )
+            embed = edit_view.create_embed()
+            await interaction.response.edit_message(embed=embed, view=edit_view)
+            await edit_view.wait()
+            
+            # 当 edit_view 停止后，控制权返回到这里。
+            # 我们需要使用原始的 interaction 来刷新主菜单，以完成交互周期。
+            await self.view.refresh(interaction)
+
+        else:
+            # 启动传统的模态框编辑器
+            from ..modals.template_modal import TemplateModal
+            
+            modal = TemplateModal(
+                template_name=self.template_name,
+                current_data=current_template,
+                parent_view=self.view
+            )
             try:
-                await interaction.followup.send(
-                    "❌ 操作超时，此次交互已失效。请重新打开管理面板再试一次。",
-                    ephemeral=True
-                )
-            except discord.HTTPException:
-                pass # 如果连 followup 都失败，就只能放弃了
+                await interaction.response.send_modal(modal)
+            except discord.NotFound:
+                try:
+                    await interaction.followup.send(
+                        "❌ 操作超时，此次交互已失效。请重新打开管理面板再试一次。",
+                        ephemeral=True
+                    )
+                except discord.HTTPException:
+                    pass

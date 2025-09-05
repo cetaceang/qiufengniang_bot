@@ -20,43 +20,49 @@ class PathConfigurationView(View):
         self.main_interaction = main_interaction
         self.guild_id = main_interaction.guild.id
         self.selected_tag_id = selected_tag_id
-        self.tags = db_manager.get_all_tags(self.guild_id)
+        self.tags = []
         self.paths = []
 
         self.add_item(BackButton())
-        self.add_item(TagSelect(self))
-        self.populate_dynamic_items()
+        # 其他项目将在 async_init 中添加
 
-    def populate_dynamic_items(self):
+    async def async_init(self):
+        """异步加载数据并填充视图。"""
+        self.tags = await db_manager.get_all_tags(self.guild_id)
+        self.add_item(TagSelect(self))
+        await self.populate_dynamic_items()
+        return self
+
+    async def populate_dynamic_items(self):
         """加载或刷新动态按钮（添加路径、路径步骤）"""
         for item in self.children[:]:
             if isinstance(item, (AddPathButton, PathButton)):
                 self.remove_item(item)
         
         if self.selected_tag_id:
-            self.paths = db_manager.get_path_for_tag(self.selected_tag_id)
+            self.paths = await db_manager.get_path_for_tag(self.selected_tag_id)
             self.add_item(AddPathButton(self.selected_tag_id))
             for path in self.paths:
                 self.add_item(PathButton(path))
 
-    @staticmethod
-    def get_embed(guild: discord.Guild, tag_id: Optional[int], tags: list, paths: list) -> discord.Embed:
+    def get_embed(self) -> discord.Embed:
         """生成路径配置的 Embed"""
         embed = discord.Embed(
             title="🗺️ 路径设置",
             description="请先从下方的下拉菜单中选择一个标签，然后为其添加、删除或排序引导路径点。",
             color=config.EMBED_COLOR_INFO
         )
-        if tag_id:
-            tag = next((t for t in tags if t['tag_id'] == tag_id), None)
+        if self.selected_tag_id:
+            tag = next((t for t in self.tags if t['tag_id'] == self.selected_tag_id), None)
             if tag:
                 embed.title = f"🗺️ 路径设置: {tag['tag_name']}"
-                if not paths:
+                if not self.paths:
                     embed.description = "这个标签还没有设置任何路径点。\n点击“添加路径点”来创建第一个吧！"
                 else:
+                    guild = self.main_interaction.guild
                     path_list = []
-                    for step in paths:
-                        location = guild.get_channel(step['location_id']) or guild.get_thread(step['location_id'])
+                    for step in self.paths:
+                        location = guild.get_channel_or_thread(step['location_id'])
                         loc_mention = location.mention if location else f"未知位置 (ID: {step['location_id']})"
                         msg = f"\n> {step['message']}" if step['message'] else ""
                         path_list.append(f"**{step['step_number']}.** {loc_mention}{msg}")
@@ -65,9 +71,9 @@ class PathConfigurationView(View):
 
     async def refresh(self):
         """刷新视图"""
-        self.tags = db_manager.get_all_tags(self.guild_id)
-        self.populate_dynamic_items()
-        embed = self.get_embed(self.main_interaction.guild, self.selected_tag_id, self.tags, self.paths)
+        self.tags = await db_manager.get_all_tags(self.guild_id)
+        await self.populate_dynamic_items()
+        embed = self.get_embed()
         await self.main_interaction.edit_original_response(embed=embed, view=self)
 
 # --- UI 组件 ---
@@ -116,7 +122,7 @@ class PathButton(Button):
         try:
             # 简单的实现：直接从数据库删除该步骤
             # 注意：这会导致 step_number 不连续，需要一个函数来重新排序
-            db_manager.remove_path_step(self.path['id']) # 假设有这个函数，需要去实现
+            await db_manager.remove_path_step(self.path['id']) # 假设有这个函数，需要去实现
             await interaction.response.send_message(f"✅ 已删除路径点：**{self.label}**", ephemeral=True)
             await self.view.refresh()
         except Exception as e:

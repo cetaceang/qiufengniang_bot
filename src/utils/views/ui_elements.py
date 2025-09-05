@@ -5,7 +5,7 @@ from discord.ui import Button
 
 class BackButton(Button):
     """一个通用的返回主菜单按钮"""
-    def __init__(self, row: int = 0):
+    def __init__(self, row: int = 4):
         super().__init__(label="返回主菜单", style=discord.ButtonStyle.grey, emoji="↩️", row=row)
 
     async def callback(self, interaction: discord.Interaction):
@@ -18,6 +18,6 @@ class BackButton(Button):
             return
 
         await interaction.response.defer()
-        embed = MainPanelView.get_main_embed(interaction.guild)
         view = MainPanelView(self.view.main_interaction)
+        embed = await view.get_main_embed()
         await self.view.main_interaction.edit_original_response(embed=embed, view=view)

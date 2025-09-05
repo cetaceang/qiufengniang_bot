@@ -6,6 +6,7 @@ from discord.ui import View, Button, button, select
 from ...utils.database import db_manager
 from ...utils.modals.channel_message_modal import ChannelMessageModal
 from ...utils.modals.extra_config_modal import ExtraConfigModal
+from ...utils.views.temporary_message_editor import TemporaryMessagesEditView
 from ... import config
 import json
 
@@ -20,28 +21,35 @@ class ChannelMessageConfigView(View):
         self.selected_channel_id: int = None
         self.selected_location_is_thread: bool = False
 
-        # 初始化时就添加组件
-        self.add_item(self.LocationSelect(self.guild))
-        self.update_buttons()
+    async def async_init(self):
+        """异步初始化视图，加载数据并设置组件。"""
+        # 异步获取数据并创建选择菜单
+        location_select = await self.LocationSelect.create(self.guild)
+        self.add_item(location_select)
+        # 更新按钮状态
+        await self.update_buttons()
 
-    def update_buttons(self):
+    async def update_buttons(self):
         """根据是否选择了频道来更新按钮状态。"""
         # 查找配置、删除按钮并根据是否选择了频道来更新它们的状态
-        config_btn = next((item for item in self.children if item.custom_id == "configure_button"), None)
+        perm_btn = next((item for item in self.children if item.custom_id == "permanent_config_button"), None)
+        temp_btn = next((item for item in self.children if item.custom_id == "temporary_config_button"), None)
         remove_btn = next((item for item in self.children if item.custom_id == "remove_button"), None)
         extra_btn = next((item for item in self.children if item.custom_id == "extra_config_button"), None)
 
         is_channel_selected = self.selected_channel_id is not None
 
-        if config_btn:
-            config_btn.disabled = not is_channel_selected
+        if perm_btn:
+            perm_btn.disabled = not is_channel_selected
+        if temp_btn:
+            temp_btn.disabled = not is_channel_selected
         if extra_btn:
             extra_btn.disabled = not is_channel_selected
 
         if remove_btn:
             config_exists = False
             if is_channel_selected:
-                config = db_manager.get_channel_message(self.selected_channel_id)
+                config = await db_manager.get_channel_message(self.selected_channel_id)
                 if config:
                     config_exists = True
             remove_btn.disabled = not config_exists
@@ -57,10 +65,10 @@ class ChannelMessageConfigView(View):
             color=config.EMBED_COLOR_INFO
         )
 
-        all_configs = db_manager.get_all_channel_messages(self.guild.id)
+        all_configs = await db_manager.get_all_channel_messages(self.guild.id)
         
         if not all_configs:
-            embed.add_field(name="当前没有配置", value="点击下方的“添加”按钮开始吧！", inline=False)
+            embed.add_field(name="当前没有配置", value="还没有任何地点配置，请先在“路径设置”中添加频道或帖子。", inline=False)
         else:
             field_value = ""
             for config_item in all_configs:
@@ -69,14 +77,16 @@ class ChannelMessageConfigView(View):
                 
                 status = []
                 permanent_data = config_item.get('permanent_message_data') or {}
-                temporary_data = config_item.get('temporary_message_data') or {}
+                temporary_data = config_item.get('temporary_message_data') or []
 
                 if permanent_data:
                     status.append("永久消息")
                 if temporary_data:
-                    status.append("临时消息")
+                    status.append(f"临时消息 ({len(temporary_data)})")
                 if permanent_data.get('image_url'):
                     status.append("🖼️")
+                if permanent_data.get('thumbnail_url'):
+                    status.append("🖋️")
                 if permanent_data.get('footer'):
                     status.append("📄")
                 
@@ -98,16 +108,25 @@ class ChannelMessageConfigView(View):
     # --- 组件定义 ---
 
     class LocationSelect(discord.ui.Select):
-        def __init__(self, guild: discord.Guild):
-            locations = db_manager.get_configured_path_locations(guild.id)
+        def __init__(self, options: list[discord.SelectOption]):
+            super().__init__(
+                placeholder="从引导路径中选择一个频道或帖子...",
+                min_values=1,
+                max_values=1,
+                options=options[:25] if options else [discord.SelectOption(label="没有在路径中配置过的频道/帖子", value="no_locations", emoji="⚠️")],
+                row=0,
+                disabled=not options
+            )
+
+        @classmethod
+        async def create(cls, guild: discord.Guild):
+            """异步创建并返回一个 LocationSelect 实例。"""
+            locations = await db_manager.get_configured_path_locations(guild.id)
             options = []
-            
             if locations:
                 for loc in locations:
-                    # 尝试获取频道或帖子对象
                     channel = guild.get_channel_or_thread(loc['location_id'])
                     if channel:
-                        # 直接检查从Discord获取的对象的类型，这比依赖数据库中的字符串更可靠
                         is_thread = isinstance(channel, discord.Thread)
                         prefix = "[帖子]" if is_thread else "[频道]"
                         options.append(discord.SelectOption(
@@ -115,17 +134,7 @@ class ChannelMessageConfigView(View):
                             value=str(channel.id),
                             description=f"ID: {channel.id}"
                         ))
-
-            if not options:
-                options.append(discord.SelectOption(label="没有在路径中配置过的频道/帖子", value="no_locations", emoji="⚠️"))
-
-            super().__init__(
-                placeholder="从引导路径中选择一个频道或帖子...",
-                min_values=1,
-                max_values=1,
-                options=options[:25], # 限制最多25个选项
-                row=0
-            )
+            return cls(options)
 
         async def callback(self, interaction: discord.Interaction):
             if self.values[0] == "no_locations":
@@ -142,22 +151,20 @@ class ChannelMessageConfigView(View):
             else:
                 self.view.selected_location_is_thread = False # Fallback
 
-            self.view.update_buttons()
+            await self.view.update_buttons()
             await self.view.main_interaction.edit_original_response(view=self.view)
 
     # --- 按钮 ---
 
-    @button(label="配置此地点消息", style=discord.ButtonStyle.primary, emoji="✏️", row=1, disabled=True, custom_id="configure_button")
-    async def configure_button(self, interaction: discord.Interaction, button: Button):
-        """打开模态框为所选地点添加或编辑配置。"""
+    @button(label="编辑永久消息", style=discord.ButtonStyle.primary, emoji="📝", row=1, disabled=True, custom_id="permanent_config_button")
+    async def permanent_config_button(self, interaction: discord.Interaction, button: Button):
+        """打开模态框为所选地点编辑永久消息。"""
         if not self.selected_channel_id:
             await interaction.response.send_message("请先从下拉菜单中选择一个地点。", ephemeral=True)
             return
 
-        # 获取现有配置（可能为 None）
-        existing_config = db_manager.get_channel_message(self.selected_channel_id)
+        existing_config = await db_manager.get_channel_message(self.selected_channel_id)
         
-        # 实例化新的模态框，并传入地点类型
         modal = ChannelMessageModal(
             interaction=interaction,
             channel_id=self.selected_channel_id,
@@ -165,11 +172,39 @@ class ChannelMessageConfigView(View):
             is_thread=self.selected_location_is_thread
         )
         await interaction.response.send_modal(modal)
-
         await modal.wait()
         
-        # 模态框结束后，刷新视图和 Embed
-        self.update_buttons()
+        await self.update_buttons()
+        new_embed = await self.get_config_list_embed()
+        await self.main_interaction.edit_original_response(embed=new_embed, view=self)
+
+    @button(label="编辑临时消息", style=discord.ButtonStyle.success, emoji="💬", row=1, disabled=True, custom_id="temporary_config_button")
+    async def temporary_config_button(self, interaction: discord.Interaction, button: Button):
+        """打开新的视图来管理多条临时消息。"""
+        if not self.selected_channel_id:
+            await interaction.response.send_message("请先从下拉菜单中选择一个地点。", ephemeral=True)
+            return
+
+        existing_config = await db_manager.get_channel_message(self.selected_channel_id)
+        temporary_data = existing_config.get('temporary_message_data', []) if existing_config else []
+        
+        # 确保 temporary_data 是一个列表
+        if not isinstance(temporary_data, list):
+            temporary_data = [temporary_data] if temporary_data else []
+
+        temp_view = TemporaryMessagesEditView(
+            parent_interaction=interaction,
+            channel_id=self.selected_channel_id,
+            existing_data=temporary_data
+        )
+        embed = temp_view.create_embed()
+        # 使用 edit_message 切换到临时消息编辑视图，而不是发送新消息
+        await interaction.response.edit_message(embed=embed, view=temp_view)
+        
+        await temp_view.wait()
+
+        # 结束后刷新主配置视图
+        await self.update_buttons()
         new_embed = await self.get_config_list_embed()
         await self.main_interaction.edit_original_response(embed=new_embed, view=self)
 
@@ -180,25 +215,28 @@ class ChannelMessageConfigView(View):
             await interaction.response.send_message("请先从下拉菜单中选择一个地点。", ephemeral=True)
             return
 
-        config = db_manager.get_channel_message(self.selected_channel_id)
-        permanent_data = (config.get('permanent_message_data') or {}) if config else {}
+        config = await db_manager.get_channel_message(self.selected_channel_id)
+        permanent_data = (config['permanent_message_data'] or {}) if config else {}
         current_image_url = permanent_data.get('image_url', '')
+        current_thumbnail_url = permanent_data.get('thumbnail_url', '')
         current_footer = permanent_data.get('footer', '')
 
-        modal = ExtraConfigModal(current_image_url=current_image_url, current_footer=current_footer)
+        modal = ExtraConfigModal(current_image_url=current_image_url, current_thumbnail_url=current_thumbnail_url, current_footer=current_footer)
         await interaction.response.send_modal(modal)
         await modal.wait()
 
         if modal.submitted_data is not None:
             # 更新 permanent_data 字典
             permanent_data['image_url'] = modal.submitted_data.get('image_url')
+            permanent_data['thumbnail_url'] = modal.submitted_data.get('thumbnail_url')
             permanent_data['footer'] = modal.submitted_data.get('footer')
             
             # 获取现有的 temporary_data，以防被覆盖
-            existing_temporary_data = (config.get('temporary_message_data') or {}) if config else {}
+            # 获取现有的 temporary_data，以防被覆盖
+            existing_temporary_data = (config['temporary_message_data'] or []) if config else []
 
             # 更新或创建配置
-            db_manager.set_channel_message(
+            await db_manager.set_channel_message(
                 guild_id=self.guild.id,
                 channel_id=self.selected_channel_id,
                 permanent_data=permanent_data,
@@ -218,13 +256,24 @@ class ChannelMessageConfigView(View):
             await interaction.response.send_message("请先从下拉菜单中选择一个地点。", ephemeral=True)
             return
         
-        db_manager.remove_channel_message(self.selected_channel_id)
+        await db_manager.remove_channel_message(self.selected_channel_id)
         
         # 重置选择并刷新
         self.selected_channel_id = None
         self.selected_location_is_thread = False
-        self.update_buttons()
+        await self.update_buttons()
         new_embed = await self.get_config_list_embed()
+        
+        # 重新创建选择菜单并更新视图
+        location_select = await self.LocationSelect.create(self.guild)
+        # 找到旧的 select 并替换它
+        for i, item in enumerate(self.children):
+            if isinstance(item, self.LocationSelect):
+                self.children[i] = location_select
+                break
+        else: # 如果没找到，就添加一个新的
+            self.add_item(location_select)
+
         await self.main_interaction.edit_original_response(embed=new_embed, view=self)
         await interaction.response.send_message(f"✅ 已成功删除该地点的专属消息配置。", ephemeral=True, delete_after=5)
 
@@ -233,6 +282,7 @@ class ChannelMessageConfigView(View):
         """返回主管理面板。"""
         from .main_panel import MainPanelView
         await interaction.response.defer()
-        embed = MainPanelView.get_main_embed(self.guild)
+        from .main_panel import MainPanelView # 放在这里避免循环导入
         view = MainPanelView(self.main_interaction)
+        embed = await view.get_main_embed()
         await self.main_interaction.edit_original_response(embed=embed, view=view)

@@ -46,11 +46,11 @@ class TagModal(Modal):
         try:
             if self.existing_tag:
                 # 编辑逻辑
-                db_manager.update_tag(self.existing_tag['tag_id'], tag_name, description)
+                await db_manager.update_tag(self.existing_tag['tag_id'], tag_name, description)
                 await interaction.followup.send(f"✅ 成功更新标签：**{tag_name}**", ephemeral=True)
             else:
                 # 新增逻辑
-                db_manager.add_tag(self.guild_id, tag_name, description)
+                await db_manager.add_tag(self.guild_id, tag_name, description)
                 await interaction.followup.send(f"✅ 成功新增标签：**{tag_name}**", ephemeral=True)
             
             # 如果设置了回调视图，则调用其 refresh 方法

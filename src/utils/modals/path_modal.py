@@ -72,9 +72,9 @@ class PathModal(Modal, title="批量添加路径点"):
 
         try:
             if success_count > 0:
-                existing_paths = db_manager.get_path_for_tag(self.tag_id)
+                existing_paths = await db_manager.get_path_for_tag(self.tag_id)
                 paths_to_set_dicts = [dict(p) for p in existing_paths] + new_paths_data
-                db_manager.set_path_for_tag(self.tag_id, paths_to_set_dicts)
+                await db_manager.set_path_for_tag(self.tag_id, paths_to_set_dicts)
 
             # 构建最终的反馈消息
             report = f"✅ **批量添加完成**\n- 成功添加 **{success_count}** 个路径点。"
