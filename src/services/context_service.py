@@ -7,6 +7,7 @@ import re # 导入正则表达式模块
 from src import config
 from ..utils.database import db_manager
 from .regex_service import regex_service
+from ..affection.service.affection_service import affection_service
  
 log = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class ContextService:
             log.error(f"获取频道 {channel_id} 消息历史时出错: {e}")
             return []
     
-    async def get_formatted_channel_history(self, channel_id: int, limit: int = 20, exclude_message_id: Optional[int] = None) -> List[Dict[str, any]]:
+    async def get_formatted_channel_history(self, channel_id: int, user_id: int, guild_id: int, limit: int = 20, exclude_message_id: Optional[int] = None) -> List[Dict[str, any]]:
         """
         获取结构化的频道对话历史，用于构建多轮对话请求。
         此方法会合并连续的用户消息，以符合 user/model 交替的API格式。
@@ -200,9 +201,14 @@ class ContextService:
             
             # 新增：如果历史记录的最后一部分是用户消息，则添加一个固定的model回复来分隔上下文
             if history_list and history_list[-1].get("role") == "user":
+                affection_status = await affection_service.get_affection_status(user_id, guild_id)
+                affection_level_prompt = affection_status.get("prompt", "")
+                
+                model_reply = f"好的, 上面是已知的历史消息。{affection_level_prompt} 我会按好感度和上下文综合回复。"
+                
                 history_list.append({
                     "role": "model",
-                    "parts": ["好的, 上面是已知的历史消息。"]
+                    "parts": [model_reply]
                 })
 
             return history_list

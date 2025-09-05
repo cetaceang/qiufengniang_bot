@@ -17,6 +17,7 @@ import io
 # 导入新库
 from google import genai
 from google.genai import types
+from google.api_core import exceptions as google_exceptions
 
 # 导入数据库管理器和提示词配置
 from ..utils.database import db_manager
@@ -271,152 +272,157 @@ class GeminiService:
                 log.info(f"正在使用 API 密钥 #{self.current_key_index} 为用户 {user_id} 生成回复...")
                 
                 try:
-                    # 自定义序列化函数，以解决 Part 和 Image 对象无法被 JSON 序列化的问题
-                    def serialize_parts(obj):
-                        if isinstance(obj, types.Part):
-                            if obj.text:
-                                return {"type": "text", "content": obj.text}
-                            elif obj.inline_data:
-                                return {"type": "image", "mime_type": obj.inline_data.mime_type, "data_size": len(obj.inline_data.data)}
-                        elif isinstance(obj, Image.Image):
-                            return f"<PIL.Image object: mode={obj.mode}, size={obj.size}>"
-                        # 对于其他无法序列化的类型，返回其字符串表示形式
-                        try:
-                            # 尝试默认转换
-                            return json.JSONEncoder().default(obj)
-                        except TypeError:
-                            return str(obj)
-
-                    log.info(f"发送给 Gemini 的请求体: \n{json.dumps(final_conversation, indent=2, ensure_ascii=False, default=serialize_parts)}")
-                except Exception as e:
-                    log.error(f"序列化请求体用于日志记录时失败: {e}")
-
-                loop = asyncio.get_event_loop()
-                # 准备 generate_content 的参数
-                gen_config = types.GenerateContentConfig(
-                    temperature=1.1,
-                    top_p=0.95,
-                    top_k=60,
-                    max_output_tokens=400,
-                )
-                
-                # 为 Flash 模型关闭思考功能
-                if 'flash' in self.model_name.lower():
-                    gen_config.thinking_config = types.ThinkingConfig(thinking_budget=0)
-                    log.info("检测到 Flash 模型，已通过正确的 thinking_config 禁用思考功能。")
-
-                # --- 严格按照官方示例组合 contents ---
-                # 历史记录部分需要被严格构造成 Content 对象
-                # 当前用户消息部分则是一个包含 [str, Image] 的简单列表
-                processed_contents = []
-                for conversation_turn in final_conversation:
-                    role = conversation_turn.get("role")
-                    parts_data = conversation_turn.get("parts", [])
-
-                    if not (role and parts_data):
-                        continue
-
-                    # 【修复关键】创建一个新的列表，用于存放被显式转换后的 Part 对象
-                    processed_parts = []
-                    for part_item in parts_data:
-                        if isinstance(part_item, str):
-                            # 对所有字符串，都明确地用 types.Part 封装
-                            processed_parts.append(types.Part(text=part_item))
-                        elif isinstance(part_item, Image.Image):
-                            # 【修复】将 PIL.Image 对象转换为 Base64 编码的字符串
-                            buffered = io.BytesIO()
-                            part_item.save(buffered, format="PNG") # 或者 JPEG
-                            img_bytes = buffered.getvalue()
-                            
-                            # 创建一个符合 SDK 要求的 Part 对象
-                            # 注意：这里我们不直接进行 base64 编码，因为 SDK 的 Part 结构会处理
-                            # 我们需要提供原始字节和 MIME 类型
-                            processed_parts.append(types.Part(
-                                inline_data=types.Blob(
-                                    mime_type='image/png', # 或 'image/jpeg'
-                                    data=img_bytes
-                                )
-                            ))
-
-                    # 确保有有效的部分再创建 Content 对象
-                    if processed_parts:
-                        processed_contents.append(types.Content(role=role, parts=processed_parts))
-
-                response = await loop.run_in_executor(
-                    self.executor,
-                    lambda: client.models.generate_content(
-                        model=self.model_name,
-                        contents=processed_contents, # 现在包含混合结构
-                        config=gen_config
-                    )
-                )
-                
-                if response.parts:
-                    raw_ai_response = response.text.strip()
-                    
-                    await context_service.update_user_conversation_history(
-                        user_id, guild_id,
-                        message if message else "",
-                        raw_ai_response
-                    )
-                    
-                    # 1. 强化对AI模仿的回复前缀的清理
-                    #    - 支持全角/半角括号
-                    #    - 支持多种空格形式
-                    reply_prefix_pattern = re.compile(r'^\s*([\[［]【回复|回复}\s*@.*?[\)）\]］])\s*', re.IGNORECASE)
-                    formatted_ai_response = reply_prefix_pattern.sub('', raw_ai_response)
-
-                    # 2. 首先，精确移除AI可能模仿的 <CURRENT_USER_MESSAGE_TO_REPLY...> 标签
-                    formatted_ai_response = re.sub(r'<CURRENT_USER_MESSAGE_TO_REPLY.*?>', '', formatted_ai_response, flags=re.IGNORECASE)
-
-                    # 3. 接着，使用新的清理函数移除所有括号 () 和 [] 及其内容，这也会处理掉 (向 @用户 回复): 格式
-                    formatted_ai_response = regex_service.clean_ai_output(formatted_ai_response)
-                    
-                    # 4. 移除Discord旧版表情符号代码
-                    discord_emoji_pattern = re.compile(r':\w+:')
-                    formatted_ai_response = discord_emoji_pattern.sub(r'', formatted_ai_response)
-
-                    # 4. 替换自定义表情符号
-                    for pattern, emojis in EMOJI_MAPPINGS:
-                        if isinstance(emojis, list) and emojis:
-                            selected_emoji = random.choice(emojis)
-                            formatted_ai_response = pattern.sub(selected_emoji, formatted_ai_response)
-                        elif isinstance(emojis, str):
-                            formatted_ai_response = pattern.sub(emojis, formatted_ai_response)
-                    
-                    blacklist_marker = "<blacklist>"
-                    if formatted_ai_response.endswith(blacklist_marker):
-                        formatted_ai_response = formatted_ai_response[:-len(blacklist_marker)].strip()
-                        try:
-                            ban_duration_minutes = random.randint(5, 10)
-                            expires_at = datetime.now() + timedelta(minutes=ban_duration_minutes)
-                            await db_manager.add_to_blacklist(user_id, guild_id, expires_at)
-                            log.info(f"用户 {user_id} 因不当请求被拉黑 {ban_duration_minutes} 分钟。")
-                            await affection_service.decrease_affection_on_blacklist(user_id, guild_id)
-                        except Exception as e:
-                            log.error(f"拉黑用户 {user_id} 时出错: {e}")
-                    
-                    log.info(f"即将为用户 {user_id} 返回AI回复: {formatted_ai_response}")
-                    return formatted_ai_response
-                
-                elif response.prompt_feedback and response.prompt_feedback.block_reason:
-                    log.warning(f"用户 {user_id} 的请求被 API 密钥 #{self.current_key_index} 的安全策略阻止，原因: {response.prompt_feedback.block_reason}")
-                    return "抱歉，你的消息似乎触发了安全限制，我无法回复。请换个说法试试？"
-                
-                else:
-                    # Log more details for debugging when response.parts is empty
-                    log.warning(
-                        f"API 密钥 #{self.current_key_index} 未能为用户 {user_id} 生成有效回复。"
-                        f"Prompt Feedback: block_reason='{response.prompt_feedback.block_reason if response.prompt_feedback else 'N/A'}', "
-                        f"safety_ratings='{response.prompt_feedback.safety_ratings if response.prompt_feedback else 'N/A'}'. "
-                        f"Response Candidates: {getattr(response, 'candidates', 'N/A')}. "
-                        f"将尝试下一个密钥。"
-                    )
                     try:
-                        problematic_request_body = json.dumps(final_conversation, indent=2, ensure_ascii=False)
-                        log.warning(f"导致空回复的请求体详情:\n{problematic_request_body}")
+                        # 自定义序列化函数，以解决 Part 和 Image 对象无法被 JSON 序列化的问题
+                        def serialize_parts(obj):
+                            if isinstance(obj, types.Part):
+                                if obj.text:
+                                    return {"type": "text", "content": obj.text}
+                                elif obj.inline_data:
+                                    return {"type": "image", "mime_type": obj.inline_data.mime_type, "data_size": len(obj.inline_data.data)}
+                            elif isinstance(obj, Image.Image):
+                                return f"<PIL.Image object: mode={obj.mode}, size={obj.size}>"
+                            # 对于其他无法序列化的类型，返回其字符串表示形式
+                            try:
+                                # 尝试默认转换
+                                return json.JSONEncoder().default(obj)
+                            except TypeError:
+                                return str(obj)
+
+                        log.info(f"发送给 Gemini 的请求体: \n{json.dumps(final_conversation, indent=2, ensure_ascii=False, default=serialize_parts)}")
                     except Exception as e:
-                        log.error(f"序列化问题请求体用于日志记录时失败: {e}")
+                        log.error(f"序列化请求体用于日志记录时失败: {e}")
+
+                    loop = asyncio.get_event_loop()
+                    # 准备 generate_content 的参数
+                    gen_config = types.GenerateContentConfig(
+                        temperature=1.1,
+                        top_p=0.95,
+                        top_k=60,
+                        max_output_tokens=400,
+                    )
+                    
+                    # 为 Flash 模型关闭思考功能
+                    if 'flash' in self.model_name.lower():
+                        gen_config.thinking_config = types.ThinkingConfig(thinking_budget=0)
+                        log.info("检测到 Flash 模型，已通过正确的 thinking_config 禁用思考功能。")
+
+                    # --- 严格按照官方示例组合 contents ---
+                    # 历史记录部分需要被严格构造成 Content 对象
+                    # 当前用户消息部分则是一个包含 [str, Image] 的简单列表
+                    processed_contents = []
+                    for conversation_turn in final_conversation:
+                        role = conversation_turn.get("role")
+                        parts_data = conversation_turn.get("parts", [])
+
+                        if not (role and parts_data):
+                            continue
+
+                        # 【修复关键】创建一个新的列表，用于存放被显式转换后的 Part 对象
+                        processed_parts = []
+                        for part_item in parts_data:
+                            if isinstance(part_item, str):
+                                # 对所有字符串，都明确地用 types.Part 封装
+                                processed_parts.append(types.Part(text=part_item))
+                            elif isinstance(part_item, Image.Image):
+                                # 【修复】将 PIL.Image 对象转换为 Base64 编码的字符串
+                                buffered = io.BytesIO()
+                                part_item.save(buffered, format="PNG") # 或者 JPEG
+                                img_bytes = buffered.getvalue()
+                                
+                                # 创建一个符合 SDK 要求的 Part 对象
+                                # 注意：这里我们不直接进行 base64 编码，因为 SDK 的 Part 结构会处理
+                                # 我们需要提供原始字节和 MIME 类型
+                                processed_parts.append(types.Part(
+                                    inline_data=types.Blob(
+                                        mime_type='image/png', # 或 'image/jpeg'
+                                        data=img_bytes
+                                    )
+                                ))
+
+                        # 确保有有效的部分再创建 Content 对象
+                        if processed_parts:
+                            processed_contents.append(types.Content(role=role, parts=processed_parts))
+
+                    response = await loop.run_in_executor(
+                        self.executor,
+                        lambda: client.models.generate_content(
+                            model=self.model_name,
+                            contents=processed_contents, # 现在包含混合结构
+                            config=gen_config
+                        )
+                    )
+                    
+                    if response.parts:
+                        raw_ai_response = response.text.strip()
+                        
+                        await context_service.update_user_conversation_history(
+                            user_id, guild_id,
+                            message if message else "",
+                            raw_ai_response
+                        )
+                        
+                        # 1. 强化对AI模仿的回复前缀的清理
+                        #    - 支持全角/半角括号
+                        #    - 支持多种空格形式
+                        reply_prefix_pattern = re.compile(r'^\s*([\[［]【回复|回复}\s*@.*?[\)）\]］])\s*', re.IGNORECASE)
+                        formatted_ai_response = reply_prefix_pattern.sub('', raw_ai_response)
+
+                        # 2. 首先，精确移除AI可能模仿的 <CURRENT_USER_MESSAGE_TO_REPLY...> 标签
+                        formatted_ai_response = re.sub(r'<CURRENT_USER_MESSAGE_TO_REPLY.*?>', '', formatted_ai_response, flags=re.IGNORECASE)
+
+                        # 3. 接着，使用新的清理函数移除所有括号 () 和 [] 及其内容，这也会处理掉 (向 @用户 回复): 格式
+                        formatted_ai_response = regex_service.clean_ai_output(formatted_ai_response)
+                        
+                        # 4. 移除Discord旧版表情符号代码
+                        discord_emoji_pattern = re.compile(r':\w+:')
+                        formatted_ai_response = discord_emoji_pattern.sub(r'', formatted_ai_response)
+
+                        # 4. 替换自定义表情符号
+                        for pattern, emojis in EMOJI_MAPPINGS:
+                            if isinstance(emojis, list) and emojis:
+                                selected_emoji = random.choice(emojis)
+                                formatted_ai_response = pattern.sub(selected_emoji, formatted_ai_response)
+                            elif isinstance(emojis, str):
+                                formatted_ai_response = pattern.sub(emojis, formatted_ai_response)
+                        
+                        blacklist_marker = "<blacklist>"
+                        if formatted_ai_response.endswith(blacklist_marker):
+                            formatted_ai_response = formatted_ai_response[:-len(blacklist_marker)].strip()
+                            try:
+                                ban_duration_minutes = random.randint(5, 10)
+                                expires_at = datetime.now() + timedelta(minutes=ban_duration_minutes)
+                                await db_manager.add_to_blacklist(user_id, guild_id, expires_at)
+                                log.info(f"用户 {user_id} 因不当请求被拉黑 {ban_duration_minutes} 分钟。")
+                                await affection_service.decrease_affection_on_blacklist(user_id, guild_id)
+                            except Exception as e:
+                                log.error(f"拉黑用户 {user_id} 时出错: {e}")
+                        
+                        log.info(f"即将为用户 {user_id} 返回AI回复: {formatted_ai_response}")
+                        return formatted_ai_response
+                    
+                    elif response.prompt_feedback and response.prompt_feedback.block_reason:
+                        log.warning(f"用户 {user_id} 的请求被 API 密钥 #{self.current_key_index} 的安全策略阻止，原因: {response.prompt_feedback.block_reason}")
+                        return "抱歉，你的消息似乎触发了安全限制，我无法回复。请换个说法试试？"
+                    
+                    else:
+                        # Log more details for debugging when response.parts is empty
+                        log.warning(
+                            f"API 密钥 #{self.current_key_index} 未能为用户 {user_id} 生成有效回复。"
+                            f"Prompt Feedback: block_reason='{response.prompt_feedback.block_reason if response.prompt_feedback else 'N/A'}', "
+                            f"safety_ratings='{response.prompt_feedback.safety_ratings if response.prompt_feedback else 'N/A'}'. "
+                            f"Response Candidates: {getattr(response, 'candidates', 'N/A')}. "
+                            f"将尝试下一个密钥。"
+                        )
+                        try:
+                            problematic_request_body = json.dumps(final_conversation, indent=2, ensure_ascii=False, default=serialize_parts)
+                            log.warning(f"导致空回复的请求体详情:\n{problematic_request_body}")
+                        except Exception as e:
+                            log.error(f"序列化问题请求体用于日志记录时失败: {e}")
+                
+                except (google_exceptions.InternalServerError, google_exceptions.ServiceUnavailable, google_exceptions.ResourceExhausted) as e:
+                    log.warning(f"API 密钥 #{self.current_key_index} 遇到可重试的API错误: {e}. 将尝试下一个密钥。")
+                    continue
             
             log.error(f"所有 API 密钥都未能为用户 {user_id} 生成有效回复。")
             return "哎呀，我好像没太明白你的意思呢～可以再说清楚一点吗？✨"

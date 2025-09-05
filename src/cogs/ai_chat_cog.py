@@ -122,24 +122,16 @@ class AIChatCog(commands.Cog):
                 # 获取格式化后的频道上下文，并排除当前正在处理的这条消息
                 channel_context = await context_service.get_formatted_channel_history(
                     message.channel.id,
+                    message.author.id,
+                    message.guild.id if message.guild else 0,
                     exclude_message_id=message.id
                 )
 
-                if not clean_content.strip() and not image_data_list:
-                    # 如果只有@mention没有其他内容，发送欢迎消息
-                    welcome_msg = await gemini_service.generate_response(
-                        message.author.id,
-                        message.guild.id if message.guild else 0,
-                        "你好，请告诉我你需要什么帮助？",
-                        channel_context=channel_context,
-                        user_name=message.author.display_name,
-                        cooldown_type=cooldown_type # 复用之前检查过的冷却类型
-                    )
-                    await message.reply(welcome_msg, mention_author=False)
-                    return
-                
                 # --- 新增：世界书上下文检索 ---
-                world_book_entries = world_book_service.find_entries(channel_context, user_message=final_content)
+                # --- 新增：将用户名和消息内容合并，用于世界书检索 ---
+                # 这样可以允许世界书条目通过用户名来触发
+                content_for_world_book = f"用户名: {message.author.display_name}\n{final_content}"
+                world_book_entries = world_book_service.find_entries(channel_context, user_message=content_for_world_book)
 
                 # 生成AI回复
                 ai_response = await gemini_service.generate_response(
