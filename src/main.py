@@ -13,8 +13,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 从我们自己的模块中导入
-from . import config
-from .utils.database import db_manager
+from src import config
+from src.guidance.utils.database import guidance_db_manager
+from src.chat.utils.database import chat_db_manager
 
 def setup_logging():
     """
@@ -43,6 +44,15 @@ def setup_logging():
     root_logger.addHandler(stdout_handler)
     root_logger.addHandler(stderr_handler)
 
+    # 5. 调整特定库的日志级别，以减少不必要的输出
+    #    例如，google-generativeai 库在 INFO 级别会打印很多网络请求相关的日志
+    #    将所有 google.*, httpx, urllib3 等库的日志级别设为 WARNING，
+    #    这样可以屏蔽掉它们所有 INFO 和 DEBUG 级别的冗余日志。
+    logging.getLogger("google_genai").setLevel(logging.WARNING)
+    logging.getLogger("chromadb").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
 class GuidanceBot(commands.Bot):
     """机器人类，继承自 commands.Bot"""
     def __init__(self):
@@ -51,7 +61,24 @@ class GuidanceBot(commands.Bot):
         intents.members = True  # 需要监听成员加入、角色变化
         intents.message_content = True # 根据 discord.py v2.0+ 的要求
 
-        super().__init__(command_prefix="!", intents=intents) # 命令前缀可以随意设置，因为我们主要用斜杠命令
+        # 解析 GUILD_ID 环境变量，支持用逗号分隔的多个 ID
+        debug_guilds = None
+        if config.GUILD_ID:
+            try:
+                # 将环境变量中的字符串转换为整数ID列表
+                debug_guilds = [int(gid.strip()) for gid in config.GUILD_ID.split(',')]
+                logging.getLogger(__name__).info(f"检测到开发服务器 ID，将以调试模式加载命令到: {debug_guilds}")
+            except ValueError:
+                logging.getLogger(__name__).error("GUILD_ID 格式错误，请确保是由逗号分隔的纯数字 ID。")
+                # 出错时，不使用调试模式，以避免意外行为
+                debug_guilds = None
+
+        # 将解析出的列表存储为实例属性，以便在 on_ready 中使用
+        self.debug_guild_ids = debug_guilds
+
+        # 使用 debug_guilds 参数初始化机器人
+        # 这会将所有斜杠命令自动注册为服务器命令，实现快速更新
+        super().__init__(command_prefix="!", intents=intents, debug_guilds=self.debug_guild_ids)
 
     async def setup_hook(self):
         """
@@ -62,7 +89,7 @@ class GuidanceBot(commands.Bot):
 
         # 1. 重新加载持久化视图
         # 这必须在加载 Cogs 之前完成，因为 Cogs 可能依赖于这些视图
-        from .utils.views import GuidancePanelView, PermanentPanelView
+        from .guidance.ui.views import GuidancePanelView, PermanentPanelView
         self.add_view(GuidancePanelView())
         log.info("已成功重新加载持久化视图 (GuidancePanelView)。")
         self.add_view(PermanentPanelView())
@@ -70,69 +97,46 @@ class GuidanceBot(commands.Bot):
 
         # 2. 加载功能模块 (Cogs)
         log.info("--- 正在加载功能模块 (Cogs) ---")
-        
-        # 确保 cogs 目录存在
-        cogs_dir = os.path.join(os.path.dirname(__file__), 'cogs')
 
-        # 确保 cogs 目录存在
-        if not os.path.exists(cogs_dir):
-            os.makedirs(cogs_dir)
-            log.warning("Cogs 目录不存在，已自动创建。")
+        # 定义要加载 Cog 的模块路径列表
+        cog_module_paths = [
+            'src.guidance.cogs',
+            'src.chat.cogs'
+        ]
 
-        # 加载主cogs目录下的所有Cog
-        for filename in os.listdir(cogs_dir):
-            if filename.endswith('.py') and not filename.startswith('__'):
-                # load_extension 使用点号分隔的 Python 模块路径
-                # load_extension 需要一个完整的、从项目根目录开始的 Python 模块路径。
-                # 因为我们使用 `python -m src.main` 启动，所以根包是 `src`。
-                cog_name = f'src.cogs.{filename[:-3]}'
-                try:
-                    await self.load_extension(cog_name)
-                    log.info(f"成功加载模块: {cog_name}")
-                except Exception as e:
-                    log.error(f"加载模块 {cog_name} 失败: {e}", exc_info=True)
-        
-        # 自动加载 games/cogs 目录下的所有Cog
-        games_cogs_dir = os.path.join(os.path.dirname(__file__), 'games', 'cogs')
-        if os.path.exists(games_cogs_dir):
-            for filename in os.listdir(games_cogs_dir):
+        # 动态查找并添加 features 目录下的所有 cogs 模块
+        # __file__ 是当前文件 (main.py) 的路径
+        # os.path.dirname(__file__) 是 src/ 目录
+        features_base_dir = os.path.join(os.path.dirname(__file__), 'chat', 'features')
+        if os.path.exists(features_base_dir):
+            for feature_name in os.listdir(features_base_dir):
+                feature_path = os.path.join(features_base_dir, feature_name)
+                if os.path.isdir(feature_path):
+                    cogs_path = os.path.join(feature_path, 'cogs')
+                    if os.path.exists(cogs_path):
+                        cog_module_paths.append(f'src.chat.features.{feature_name}.cogs')
+
+        # 遍历并加载所有找到的 Cog 模块
+        for path in cog_module_paths:
+            # 将 Python 模块路径转换为文件系统路径
+            # 'src.guidance.cogs' -> ['guidance', 'cogs']
+            relative_path_parts = path.replace('src.', '').split('.')
+            # 'E:\Discord_bot\Odysseia-Guidance\src' + 'guidance' + 'cogs'
+            fs_path = os.path.join(os.path.dirname(__file__), *relative_path_parts)
+            
+            if not os.path.exists(fs_path):
+                log.warning(f"Cog 目录不存在: {fs_path}")
+                continue
+
+            log.info(f"--- 正在从 {path} 加载 Cogs ---")
+            for filename in os.listdir(fs_path):
                 if filename.endswith('.py') and not filename.startswith('__'):
-                    cog_name = f'src.games.cogs.{filename[:-3]}'
+                    cog_name = f'{path}.{filename[:-3]}'
                     try:
                         await self.load_extension(cog_name)
                         log.info(f"成功加载模块: {cog_name}")
                     except Exception as e:
                         log.error(f"加载模块 {cog_name} 失败: {e}", exc_info=True)
-        else:
-            log.warning("Games Cogs 目录不存在。")
-
-        # 自动加载 odysseia_coin/cogs 目录下的所有Cog
-        odysseia_cogs_dir = os.path.join(os.path.dirname(__file__), 'odysseia_coin', 'cogs')
-        if os.path.exists(odysseia_cogs_dir):
-            for filename in os.listdir(odysseia_cogs_dir):
-                if filename.endswith('.py') and not filename.startswith('__'):
-                    cog_name = f'src.odysseia_coin.cogs.{filename[:-3]}'
-                    try:
-                        await self.load_extension(cog_name)
-                        log.info(f"成功加载模块: {cog_name}")
-                    except Exception as e:
-                        log.error(f"加载模块 {cog_name} 失败: {e}", exc_info=True)
-        else:
-            log.warning("Odysseia Coin Cogs 目录不存在。")
-
-        # 自动加载 affection/cogs 目录下的所有Cog
-        affection_cogs_dir = os.path.join(os.path.dirname(__file__), 'affection', 'cogs')
-        if os.path.exists(affection_cogs_dir):
-            for filename in os.listdir(affection_cogs_dir):
-                if filename.endswith('.py') and not filename.startswith('__'):
-                    cog_name = f'src.affection.cogs.{filename[:-3]}'
-                    try:
-                        await self.load_extension(cog_name)
-                        log.info(f"成功加载模块: {cog_name}")
-                    except Exception as e:
-                        log.error(f"加载模块 {cog_name} 失败: {e}", exc_info=True)
-        else:
-            log.warning("Affection Cogs 目录不存在。")
 
         log.info("--- 所有模块加载完毕 ---")
 
@@ -160,37 +164,20 @@ class GuidanceBot(commands.Bot):
         # 如果在 .env 文件中指定了 GUILD_ID，我们将所有命令作为私有命令同步到该服务器，这样可以绕过 Discord 的全局命令缓存。
         # 如果没有指定 GUILD_ID（通常在生产环境中），我们才进行全局同步。
         # 最终的、正确的命令同步逻辑
-        if config.GUILD_ID:
-            # 开发模式：使用 copy_global_to 实现快速同步，并执行一次性全局清理
-            guild_ids = [int(gid.strip()) for gid in config.GUILD_ID.split(',')]
-            for guild_id in guild_ids:
-                guild = discord.Object(id=guild_id)
-                try:
-                    # 1. 将所有全局命令定义复制到开发服务器，准备进行覆盖式同步（快速）
-                    log.info(f"检测到开发服务器 ID: {guild_id}。正在准备快速同步...")
-                    self.tree.copy_global_to(guild=guild)
-                    
-                    # 2. 同步开发服务器的命令
-                    # 这会清除该服务器上所有不由当前机器人代码定义的旧命令，并注册新命令。
-                    synced_commands = await self.tree.sync(guild=guild)
-                    log.info(f"已成功同步 {len(synced_commands)} 个命令到开发服务器 {guild_id}。")
-
-                except Exception as e:
-                    log.error(f"为开发服务器 {guild_id} 同步命令时出错: {e}", exc_info=True)
-            
-            # 3. 执行一次性全局命令清理，彻底移除旧的、缓存的全局命令
-            log.info("正在执行一次性全局命令清理...")
-            self.tree.clear_commands(guild=None)
-            await self.tree.sync(guild=None)
-            log.info("全局命令清理完成。所有旧命令应已彻底移除。")
+        # 由于我们使用了 debug_guilds 初始化机器人，discord.py 会自动处理同步目标。
+        # 我们只需要调用一次 sync() 即可。
+        if self.debug_guild_ids:
+            log.info(f"正在将命令同步到开发服务器: {self.debug_guild_ids}...")
         else:
-            # 生产模式：只进行标准的全局同步
-            log.warning("未设置 GUILD_ID，将进行全局命令同步（可能需要一小时生效）。")
-            try:
-                await self.tree.sync()
-                log.info("全局命令同步完成。")
-            except Exception as e:
-                log.error(f"全局同步命令时出错: {e}", exc_info=True)
+            log.info("未设置开发服务器ID，正在进行全局命令同步（可能需要一小时生效）...")
+
+        try:
+            # 如果在初始化时设置了 debug_guilds，sync() 会自动同步到这些服务器。
+            # 如果没有设置，sync() 会进行全局同步。
+            synced_commands = await self.tree.sync()
+            log.info(f"成功同步 {len(synced_commands)} 个命令。")
+        except Exception as e:
+            log.error(f"同步命令时出错: {e}", exc_info=True)
             
         log.info('--------------------')
 
@@ -203,11 +190,18 @@ async def main():
 
     # 3. 异步初始化数据库
     log.info("正在异步初始化数据库...")
-    await db_manager.init_async()
+    await guidance_db_manager.init_async()
+    log.info("正在异步初始化 Chat 数据库...")
+    await chat_db_manager.init_async()
+
+    # 3.5. 初始化商店商品
+    from src.chat.features.odysseia_coin.service.coin_service import coin_service, _setup_initial_items
+    await _setup_initial_items()
+    log.info("已初始化商店商品。")
 
     # 4. 创建并运行机器人实例
     bot = GuidanceBot()
-    db_manager.set_bot_instance(bot)
+    guidance_db_manager.set_bot_instance(bot)
     
     token = os.getenv("DISCORD_TOKEN")
     if not token:
@@ -222,7 +216,8 @@ async def main():
         log.critical(f"启动机器人时发生未知错误: {e}", exc_info=True)
     finally:
         # 在机器人关闭时，确保数据库连接被关闭
-        await db_manager.close()
+        await guidance_db_manager.close()
+        await chat_db_manager.close()
         log.info("机器人已下线，数据库连接已关闭。")
 
 

@@ -1,0 +1,463 @@
+import sqlite3
+import json
+import logging
+import os
+import asyncio
+from functools import partial
+from typing import Optional, List, Dict, Any, Callable
+from datetime import datetime, timezone
+
+# --- 常量定义 ---
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+DB_PATH = os.path.join(_PROJECT_ROOT, "data", "chat.db")
+
+# --- 日志记录器 ---
+log = logging.getLogger(__name__)
+
+class ChatDatabaseManager:
+    """管理所有与聊天模块相关的 SQLite 数据库的异步交互。"""
+
+    def __init__(self, db_path: str = DB_PATH):
+        """初始化数据库管理器。"""
+        self.db_path = db_path
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+    async def init_async(self):
+        """异步初始化数据库，在事件循环中运行同步的建表逻辑。"""
+        log.info("开始异步 Chat 数据库初始化...")
+        await self._execute(self._init_database_logic)
+        log.info("异步 Chat 数据库初始化完成。")
+
+    def _init_database_logic(self):
+        """包含所有同步数据库初始化逻辑的方法。"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # --- AI对话上下文表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_conversation_contexts (
+                    context_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    guild_id INTEGER NOT NULL,
+                    conversation_history TEXT NOT NULL DEFAULT '[]',
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, guild_id)
+                );
+            """)
+            
+            # 检查并添加 personal_message_count 列到 ai_conversation_contexts
+            cursor.execute("PRAGMA table_info(ai_conversation_contexts);")
+            columns_contexts = [info[1] for info in cursor.fetchall()]
+            if 'personal_message_count' not in columns_contexts:
+                cursor.execute("""
+                    ALTER TABLE ai_conversation_contexts
+                    ADD COLUMN personal_message_count INTEGER NOT NULL DEFAULT 0;
+                """)
+                log.info("已向 ai_conversation_contexts 表添加 personal_message_count 列。")
+            
+            # --- 频道记忆锚点表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS channel_memory_anchors (
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    anchor_message_id INTEGER NOT NULL,
+                    PRIMARY KEY (guild_id, channel_id)
+                );
+            """)
+                
+            # --- 游戏状态表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS game_states (
+                    game_id TEXT PRIMARY KEY,
+                    player_hand TEXT NOT NULL,
+                    ai_hand TEXT NOT NULL,
+                    ai_strategy TEXT NOT NULL,
+                    current_turn TEXT NOT NULL,
+                    game_over BOOLEAN NOT NULL DEFAULT 0,
+                    winner TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+                
+            # --- AI提示词配置表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_prompts (
+                    prompt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    prompt_name TEXT NOT NULL,
+                    prompt_content TEXT NOT NULL,
+                    is_active BOOLEAN DEFAULT 1,
+                    UNIQUE(guild_id, prompt_name)
+                );
+            """)
+                
+            # --- 黑名单表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS blacklisted_users (
+                    user_id INTEGER NOT NULL,
+                    guild_id INTEGER NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    PRIMARY KEY (user_id, guild_id)
+                );
+            """)
+                 
+            # --- AI好感度表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_affection (
+                    user_id INTEGER NOT NULL,
+                    guild_id INTEGER NOT NULL,
+                    affection_points INTEGER NOT NULL DEFAULT 0,
+                    daily_affection_gain INTEGER NOT NULL DEFAULT 0,
+                    last_update_date TEXT,
+                    last_interaction_date TEXT,
+                    PRIMARY KEY (user_id, guild_id)
+                );
+            """)
+
+            # 检查并添加 last_gift_date 列到 ai_affection
+            cursor.execute("PRAGMA table_info(ai_affection);")
+            columns_affection = [info[1] for info in cursor.fetchall()]
+            if 'last_gift_date' not in columns_affection:
+                cursor.execute("""
+                    ALTER TABLE ai_affection
+                    ADD COLUMN last_gift_date TEXT;
+                """)
+                log.info("已向 ai_affection 表添加 last_gift_date 列。")
+
+            # --- 用户核心档案表 (User Profile) ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    has_personal_memory BOOLEAN NOT NULL DEFAULT 0,
+                    personal_summary TEXT
+                );
+            """)
+            
+            # --- 奥德赛币系统表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_coins (
+                    user_id INTEGER PRIMARY KEY,
+                    balance INTEGER NOT NULL DEFAULT 0,
+                    last_daily_message_date TEXT
+                );
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS shop_items (
+                    item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    price INTEGER NOT NULL,
+                    category TEXT NOT NULL,
+                    target TEXT NOT NULL DEFAULT 'self',
+                    effect_id TEXT,
+                    is_available BOOLEAN NOT NULL DEFAULT 1
+                );
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_inventory (
+                    inventory_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    item_id INTEGER NOT NULL,
+                    quantity INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY (user_id) REFERENCES user_coins(user_id) ON DELETE CASCADE,
+                    FOREIGN KEY (item_id) REFERENCES shop_items(item_id) ON DELETE CASCADE
+                );
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS coin_transactions (
+                    transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES user_coins(user_id) ON DELETE CASCADE
+                );
+            """)
+            
+            # 检查并添加 coffee_effect_expires_at 列到 user_coins
+            cursor.execute("PRAGMA table_info(user_coins);")
+            columns = [info[1] for info in cursor.fetchall()]
+            if 'coffee_effect_expires_at' not in columns:
+                cursor.execute("""
+                    ALTER TABLE user_coins
+                    ADD COLUMN coffee_effect_expires_at TIMESTAMP;
+                """)
+                log.info("已向 user_coins 表添加 coffee_effect_expires_at 列。")
+
+            # 个人记忆功能的'memory_feature_unlocked'列已迁移至'users'表，此处不再需要
+            # 保留此注释以作记录
+
+            conn.commit()
+            log.info(f"数据库表在 {self.db_path} 同步初始化成功。")
+        except sqlite3.Error as e:
+            log.error(f"同步初始化数据库表时出错: {e}")
+            raise
+        finally:
+            if 'conn' in locals() and conn:
+                conn.close()
+
+    async def _execute(self, func: Callable, *args, **kwargs) -> Any:
+        """在线程池中执行一个同步的数据库操作。"""
+        try:
+            blocking_task = partial(func, *args, **kwargs)
+            result = await asyncio.get_running_loop().run_in_executor(None, blocking_task)
+            return result
+        except Exception as e:
+            log.error(f"数据库执行器出错: {e}", exc_info=True)
+            raise
+
+    def _db_transaction(self, query: str, params: tuple = (), *, fetch: str = "none", commit: bool = False):
+        """一个通用的同步事务函数。"""
+        conn = None
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            
+            if fetch == "one":
+                result = cursor.fetchone()
+            elif fetch == "all":
+                result = cursor.fetchall()
+            elif fetch == "lastrowid":
+                result = cursor.lastrowid
+            elif fetch == "rowcount":
+                result = cursor.rowcount
+            else:
+                result = None
+
+            if commit:
+                conn.commit()
+
+            return result
+        except sqlite3.Error as e:
+            if conn:
+                conn.rollback()
+            log.error(f"数据库事务失败: {e} | Query: {query}")
+            raise
+        finally:
+            if conn:
+                conn.close()
+
+    async def close(self):
+        """关闭数据库连接（在异步模型中通常不需要）。"""
+        log.info("数据库管理器正在关闭（异步模式下无操作）。")
+        pass
+
+    # --- AI对话上下文管理 ---
+    async def get_ai_conversation_context(self, user_id: int, guild_id: int) -> Optional[Dict[str, Any]]:
+        query = "SELECT * FROM ai_conversation_contexts WHERE user_id = ? AND guild_id = ?"
+        row = await self._execute(self._db_transaction, query, (user_id, guild_id), fetch="one")
+        if row:
+            try:
+                context = dict(row)
+                context['conversation_history'] = json.loads(context['conversation_history'])
+                return context
+            except (json.JSONDecodeError, TypeError):
+                log.warning(f"解析用户 {user_id} 的对话上下文JSON时出错。")
+        return None
+
+    async def update_ai_conversation_context(self, user_id: int, guild_id: int, conversation_history: List[Dict]) -> None:
+        history_json = json.dumps(conversation_history, ensure_ascii=False)
+        query = """
+            INSERT INTO ai_conversation_contexts (user_id, guild_id, conversation_history)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, guild_id) DO UPDATE SET
+                conversation_history = excluded.conversation_history,
+                last_updated = CURRENT_TIMESTAMP
+        """
+        await self._execute(self._db_transaction, query, (user_id, guild_id, history_json), commit=True)
+
+    async def clear_ai_conversation_context(self, user_id: int, guild_id: int) -> None:
+        query = "DELETE FROM ai_conversation_contexts WHERE user_id = ? AND guild_id = ?"
+        await self._execute(self._db_transaction, query, (user_id, guild_id), commit=True)
+        log.info(f"已清除用户 {user_id} 在服务器 {guild_id} 的AI对话上下文")
+
+    async def increment_personal_message_count(self, user_id: int, guild_id: int) -> int:
+        """增加用户的个人消息计数器，并返回新的计数值。"""
+        query = """
+            INSERT INTO ai_conversation_contexts (user_id, guild_id, personal_message_count)
+            VALUES (?, ?, 1)
+            ON CONFLICT(user_id, guild_id) DO UPDATE SET
+                personal_message_count = personal_message_count + 1
+            RETURNING personal_message_count;
+        """
+        result = await self._execute(self._db_transaction, query, (user_id, guild_id), fetch="one", commit=True)
+        return result['personal_message_count'] if result else 0
+
+    async def reset_personal_message_count(self, user_id: int, guild_id: int) -> None:
+        """重置用户的个人消息计数器。"""
+        query = """
+            UPDATE ai_conversation_contexts
+            SET personal_message_count = 0
+            WHERE user_id = ? AND guild_id = ?
+        """
+        await self._execute(self._db_transaction, query, (user_id, guild_id), commit=True)
+
+    # --- 频道记忆锚点管理 ---
+    async def get_channel_memory_anchor(self, guild_id: int, channel_id: int) -> Optional[int]:
+        query = "SELECT anchor_message_id FROM channel_memory_anchors WHERE guild_id = ? AND channel_id = ?"
+        row = await self._execute(self._db_transaction, query, (guild_id, channel_id), fetch="one")
+        return row['anchor_message_id'] if row else None
+
+    async def set_channel_memory_anchor(self, guild_id: int, channel_id: int, anchor_message_id: int) -> None:
+        query = """
+            INSERT INTO channel_memory_anchors (guild_id, channel_id, anchor_message_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                anchor_message_id = excluded.anchor_message_id;
+        """
+        await self._execute(self._db_transaction, query, (guild_id, channel_id, anchor_message_id), commit=True)
+        log.info(f"已为服务器 {guild_id} 的频道 {channel_id} 设置记忆锚点: {anchor_message_id}")
+
+    async def delete_channel_memory_anchor(self, guild_id: int, channel_id: int) -> int:
+        query = "DELETE FROM channel_memory_anchors WHERE guild_id = ? AND channel_id = ?"
+        deleted_rows = await self._execute(self._db_transaction, query, (guild_id, channel_id), commit=True, fetch="rowcount")
+        if deleted_rows > 0:
+            log.info(f"已删除服务器 {guild_id} 频道 {channel_id} 的记忆锚点。")
+        return deleted_rows
+
+    # --- AI提示词管理 ---
+    async def get_ai_prompt(self, guild_id: int, prompt_name: str) -> Optional[str]:
+        query = "SELECT prompt_content FROM ai_prompts WHERE guild_id = ? AND prompt_name = ? AND is_active = 1"
+        row = await self._execute(self._db_transaction, query, (guild_id, prompt_name), fetch="one")
+        return row['prompt_content'] if row else None
+
+    async def set_ai_prompt(self, guild_id: int, prompt_name: str, prompt_content: str) -> None:
+        query = """
+            INSERT INTO ai_prompts (guild_id, prompt_name, prompt_content)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, prompt_name) DO UPDATE SET
+                prompt_content = excluded.prompt_content,
+                is_active = 1
+        """
+        await self._execute(self._db_transaction, query, (guild_id, prompt_name, prompt_content), commit=True)
+        log.info(f"已为服务器 {guild_id} 设置AI提示词: {prompt_name}")
+
+    async def get_all_ai_prompts(self, guild_id: int) -> Dict[str, str]:
+        query = "SELECT prompt_name, prompt_content FROM ai_prompts WHERE guild_id = ? AND is_active = 1"
+        rows = await self._execute(self._db_transaction, query, (guild_id,), fetch="all")
+        return {row['prompt_name']: row['prompt_content'] for row in rows}
+
+    # --- 黑名单管理 ---
+    async def add_to_blacklist(self, user_id: int, guild_id: int, expires_at) -> None:
+        query = """
+            INSERT INTO blacklisted_users (user_id, guild_id, expires_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, guild_id) DO UPDATE SET
+                expires_at = excluded.expires_at;
+        """
+        await self._execute(self._db_transaction, query, (user_id, guild_id, expires_at), commit=True)
+        log.info(f"已将用户 {user_id} 添加到服务器 {guild_id} 的黑名单，到期时间: {expires_at}")
+
+    async def remove_from_blacklist(self, user_id: int, guild_id: int) -> None:
+        query = "DELETE FROM blacklisted_users WHERE user_id = ? AND guild_id = ?"
+        await self._execute(self._db_transaction, query, (user_id, guild_id), commit=True)
+        log.info(f"已将用户 {user_id} 从服务器 {guild_id} 的黑名单中移除")
+
+    async def is_user_blacklisted(self, user_id: int, guild_id: int) -> bool:
+        # 清理过期黑名单记录
+        await self._execute(self._db_transaction, "DELETE FROM blacklisted_users WHERE expires_at < datetime('now')", commit=True)
+        
+        # 检查用户是否在黑名单中
+        query = "SELECT expires_at FROM blacklisted_users WHERE user_id = ? AND guild_id = ?"
+        result = await self._execute(self._db_transaction, query, (user_id, guild_id), fetch="one")
+        
+        if result:
+            db_expires_at_str = result['expires_at']
+            # 将数据库中的时间字符串转换为 datetime 对象，并假设它是 UTC
+            db_expires_at = datetime.fromisoformat(db_expires_at_str).replace(tzinfo=timezone.utc)
+            current_utc_time = datetime.now(timezone.utc)
+            
+            log.info(f"检查用户 {user_id} 在服务器 {guild_id} 的黑名单状态:")
+            log.info(f"  数据库过期时间 (UTC): {db_expires_at}")
+            log.info(f"  当前 UTC 时间: {current_utc_time}")
+            
+            if db_expires_at > current_utc_time:
+                log.info(f"  用户 {user_id} 仍在黑名单中。")
+                return True
+            else:
+                log.info(f"  用户 {user_id} 的黑名单已过期，但未被清理 (应在下次检查时清理)。")
+                return False
+        
+        log.info(f"用户 {user_id} 不在服务器 {guild_id} 的黑名单中。")
+        return False
+
+    # --- 好感度管理 ---
+    async def get_affection(self, user_id: int, guild_id: int) -> Optional[sqlite3.Row]:
+        query = "SELECT * FROM ai_affection WHERE user_id = ? AND guild_id = ?"
+        return await self._execute(self._db_transaction, query, (user_id, guild_id), fetch="one")
+
+    async def update_affection(self, user_id: int, guild_id: int, **kwargs) -> None:
+        updates = {key: value for key, value in kwargs.items() if value is not None}
+        if not updates:
+            return
+
+        current_affection = await self.get_affection(user_id, guild_id)
+        if not current_affection:
+            defaults = {
+                'affection_points': 0, 'daily_affection_gain': 0,
+                'last_update_date': None, 'last_interaction_date': None
+            }
+            defaults.update(updates)
+            insert_query = """
+                INSERT INTO ai_affection (user_id, guild_id, affection_points, daily_affection_gain, last_update_date, last_interaction_date)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """
+            await self._execute(self._db_transaction, insert_query, 
+                                (user_id, guild_id, defaults['affection_points'], defaults['daily_affection_gain'], 
+                                 defaults['last_update_date'], defaults['last_interaction_date']), 
+                                commit=True)
+            log.info(f"为用户 {user_id} 在服务器 {guild_id} 创建了好感度记录: {defaults}")
+            return
+
+        set_clause = ", ".join([f"{key} = ?" for key in updates.keys()])
+        values = list(updates.values()) + [user_id, guild_id]
+        query = f"UPDATE ai_affection SET {set_clause} WHERE user_id = ? AND guild_id = ?"
+        await self._execute(self._db_transaction, query, tuple(values), commit=True)
+
+    async def get_all_affections_for_guild(self, guild_id: int) -> List[sqlite3.Row]:
+        query = "SELECT * FROM ai_affection WHERE guild_id = ?"
+        return await self._execute(self._db_transaction, query, (guild_id,), fetch="all")
+
+    async def reset_daily_affection_gain(self, guild_id: int, new_date: str) -> None:
+        query = "UPDATE ai_affection SET daily_affection_gain = 0, last_update_date = ? WHERE guild_id = ?"
+        await self._execute(self._db_transaction, query, (new_date, guild_id), commit=True)
+        log.info(f"已重置服务器 {guild_id} 的每日好感度获得量，日期更新为 {new_date}")
+
+    async def reset_all_affection_points(self, guild_id: int) -> int:
+        query = "UPDATE ai_affection SET affection_points = 0 WHERE guild_id = ?"
+        rowcount = await self._execute(self._db_transaction, query, (guild_id,), commit=True, fetch="rowcount")
+        log.info(f"已将服务器 {guild_id} 中 {rowcount} 名用户的好感度重置为 0。")
+        return rowcount
+
+    # --- 用户档案管理 ---
+    async def get_user_profile(self, user_id: int) -> Optional[sqlite3.Row]:
+        """获取用户的核心档案信息，例如是否解锁了个人记忆功能。"""
+        query = "SELECT user_id, has_personal_memory, personal_summary FROM users WHERE user_id = ?"
+        try:
+            return await self._execute(self._db_transaction, query, (user_id,), fetch="one")
+        except sqlite3.OperationalError as e:
+            # 如果 users 表或列不存在，优雅地处理
+            if "no such table" in str(e) or "no such column" in str(e):
+                log.warning(f"尝试获取用户 {user_id} 的档案失败，因为 'users' 表或相关列不存在。请确保已运行最新的数据库迁移脚本。")
+                return None
+            raise
+
+    async def update_personal_summary(self, user_id: int, summary: str) -> None:
+        """更新用户的个人记忆摘要。"""
+        query = "UPDATE users SET personal_summary = ? WHERE user_id = ?"
+        try:
+            await self._execute(self._db_transaction, query, (summary, user_id), commit=True)
+            log.info(f"已更新用户 {user_id} 的个人记忆摘要。")
+        except sqlite3.OperationalError as e:
+            log.error(f"更新用户 {user_id} 的个人记忆摘要失败: {e}")
+            raise
+
+# --- 单例实例 ---
+chat_db_manager = ChatDatabaseManager()

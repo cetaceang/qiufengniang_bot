@@ -1,48 +1,82 @@
-# -*- coding: utf-8 -*-
-import asyncio
-import os
-import sys
+import sqlite3
 import json
+import os
 
-# 将 src 目录添加到 Python 路径中
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
-
-from utils.database import db_manager
-from config import GUILD_ID
-
-async def main():
+def diagnose_database():
     """
-    主函数，用于连接数据库并打印出所有的 channel_messages 数据。
+    Connects to the database and runs a few queries to diagnose the data integrity.
     """
-    if not GUILD_ID:
-        print("错误：请在 .env 文件中设置 GUILD_ID")
+    db_path = os.path.join('data', 'world_book.sqlite3')
+    if not os.path.exists(db_path):
+        print(f"Database file not found at '{db_path}'.")
         return
 
-    guild_id = int(GUILD_ID)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
 
-    print(f"正在从数据库中为服务器 {guild_id} 读取所有频道消息配置...")
-    
-    try:
-        all_channel_messages = await db_manager.get_all_channel_messages(guild_id)
+    print("--- Diagnosing Database ---")
+
+    # 1. Check a community member
+    print("\n[1] Checking a community member (ID: huangdoufen_1)...")
+    cursor.execute("SELECT * FROM community_members WHERE id = ?", ('huangdoufen_1',))
+    member = cursor.fetchone()
+    if member:
+        print("  - Member found:")
+        print(f"    ID: {member[0]}, Title: {member[1]}, Discord ID: {member[2]}")
+        content = json.loads(member[5])
+        print(f"    Content: {content}")
         
-        if not all_channel_messages:
-            print("数据库中没有找到任何频道消息配置。")
-            return
-            
-        print(f"✅ 查询成功，找到 {len(all_channel_messages)} 条配置记录。\n")
+        cursor.execute("SELECT nickname FROM member_discord_nicknames WHERE member_id = ?", ('huangdoufen_1',))
+        nicknames = cursor.fetchall()
+        print(f"  - Nicknames: {[n[0] for n in nicknames]}")
+    else:
+        print("  - Member 'huangdoufen_1' not found!")
+
+    # 2. Check a general knowledge entry
+    print("\n[2] Checking a general knowledge entry (ID: reverse_proxy)...")
+    cursor.execute("""
+        SELECT gk.id, gk.title, gk.name, c.name 
+        FROM general_knowledge gk
+        JOIN categories c ON gk.category_id = c.id
+        WHERE gk.id = ?
+    """, ('reverse_proxy',))
+    entry = cursor.fetchone()
+    if entry:
+        print("  - Entry found:")
+        print(f"    ID: {entry[0]}, Title: {entry[1]}, Name: {entry[2]}, Category: {entry[3]}")
         
-        for message_config in all_channel_messages:
-            print("-" * 40)
-            print(f"配置信息 (Channel ID: {message_config.get('channel_id')})")
-            print("-" * 40)
-            
-            # 使用 json.dumps 格式化输出，确保中文和缩进正确
-            formatted_config = json.dumps(message_config, indent=2, ensure_ascii=False)
-            print(formatted_config)
-            print("\n")
+        cursor.execute("SELECT alias FROM aliases WHERE entry_id = ?", ('reverse_proxy',))
+        aliases = cursor.fetchall()
+        print(f"  - Aliases: {[a[0] for a in aliases]}")
+    else:
+        print("  - Entry 'reverse_proxy' not found!")
+        
+    # 3. Check a slang entry with refers_to
+    print("\n[3] Checking a slang entry (ID: hachimi)...")
+    cursor.execute("SELECT id, name FROM general_knowledge WHERE id = ?", ('hachimi',))
+    slang = cursor.fetchone()
+    if slang:
+        print("  - Slang found:")
+        print(f"    ID: {slang[0]}, Name: {slang[1]}")
+        
+        cursor.execute("SELECT reference FROM knowledge_refers_to WHERE entry_id = ?", ('hachimi',))
+        refs = cursor.fetchall()
+        print(f"  - Refers to: {[r[0] for r in refs]}")
+    else:
+        print("  - Slang 'hachimi' not found!")
 
-    except Exception as e:
-        print(f"❌ 从数据库读取数据时发生错误: {e}")
+    # 4. Count total entries in key tables
+    print("\n[4] Counting total entries...")
+    cursor.execute("SELECT COUNT(*) FROM community_members")
+    print(f"  - Total community members: {cursor.fetchone()[0]}")
+    cursor.execute("SELECT COUNT(*) FROM general_knowledge")
+    print(f"  - Total general knowledge entries: {cursor.fetchone()[0]}")
+    cursor.execute("SELECT COUNT(*) FROM categories")
+    print(f"  - Total categories: {cursor.fetchone()[0]}")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+
+    print("\n--- Diagnosis Complete ---")
+    conn.close()
+
+if __name__ == '__main__':
+    diagnose_database()
