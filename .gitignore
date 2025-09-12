@@ -144,3 +144,6 @@ Thumbs.db
 *.db
 .env
 !*.example
+
+# Chroma DB files
+data/chroma_db/
