@@ -87,42 +87,42 @@ class CoinCog(commands.Cog):
             log.error(f"打开商店时出错: {e}", exc_info=True)
             await interaction.followup.send("打开商店时发生错误，请稍后再试。", ephemeral=True)
 
-    @app_commands.command(name="admin_add_coins", description="【管理员】为指定用户添加类脑币。")
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.describe(
-        user="选择一个用户",
-        amount="要添加的金额"
-    )
-    async def admin_add_coins(
-        self,
-        interaction: discord.Interaction,
-        user: discord.Member,
-        amount: int
-    ):
-        """管理员命令：为用户添加类脑币"""
-        if amount <= 0:
-            await interaction.response.send_message("❌ 金额必须是正数。", ephemeral=True)
-            return
+    # @app_commands.command(name="admin_add_coins", description="【管理员】为指定用户添加类脑币。")
+    # @app_commands.default_permissions(administrator=True)
+    # @app_commands.describe(
+    #     user="选择一个用户",
+    #     amount="要添加的金额"
+    # )
+    # async def admin_add_coins(
+    #     self,
+    #     interaction: discord.Interaction,
+    #     user: discord.Member,
+    #     amount: int
+    # ):
+    #     """管理员命令：为用户添加类脑币"""
+    #     if amount <= 0:
+    #         await interaction.response.send_message("❌ 金额必须是正数。", ephemeral=True)
+    #         return
 
-        await interaction.response.defer(ephemeral=True)
-        try:
-            reason = f"由管理员 {interaction.user.name} 添加"
-            new_balance = await coin_service.add_coins(user.id, amount, reason)
+    #     await interaction.response.defer(ephemeral=True)
+    #     try:
+    #         reason = f"由管理员 {interaction.user.name} 添加"
+    #         new_balance = await coin_service.add_coins(user.id, amount, reason)
             
-            embed = discord.Embed(
-                title="💰 类脑币添加成功",
-                description=f"已成功为用户 {user.mention} 添加了 **{amount}** 类脑币。",
-                color=discord.Color.green()
-            )
-            embed.add_field(name="操作人", value=interaction.user.mention, inline=True)
-            embed.add_field(name="新余额", value=f"{new_balance}", inline=True)
+    #         embed = discord.Embed(
+    #             title="💰 类脑币添加成功",
+    #             description=f"已成功为用户 {user.mention} 添加了 **{amount}** 类脑币。",
+    #             color=discord.Color.green()
+    #         )
+    #         embed.add_field(name="操作人", value=interaction.user.mention, inline=True)
+    #         embed.add_field(name="新余额", value=f"{new_balance}", inline=True)
             
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            log.info(f"管理员 {interaction.user.name} 为用户 {user.name} 添加了 {amount} 类脑币。")
+    #         await interaction.followup.send(embed=embed, ephemeral=True)
+    #         log.info(f"管理员 {interaction.user.name} 为用户 {user.name} 添加了 {amount} 类脑币。")
 
-        except Exception as e:
-            log.error(f"管理员 {interaction.user.name} 添加类脑币时出错: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ 操作失败，发生内部错误：{e}", ephemeral=True)
+    #     except Exception as e:
+    #         log.error(f"管理员 {interaction.user.name} 添加类脑币时出错: {e}", exc_info=True)
+    #         await interaction.followup.send(f"❌ 操作失败，发生内部错误：{e}", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

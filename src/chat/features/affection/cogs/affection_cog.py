@@ -44,7 +44,7 @@ class AffectionCog(commands.Cog):
         
         log.info("每日好感度定时任务执行完毕。")
 
-    @app_commands.command(name="affection", description="查询你与AI的好感度状态。")
+    @app_commands.command(name="好感度", description="查询你与类脑娘的好感度状态。")
     async def affection(self, interaction: discord.Interaction):
         """处理好感度查询命令。"""
         await interaction.response.defer(ephemeral=True)
@@ -76,62 +76,62 @@ class AffectionCog(commands.Cog):
             # 可以在这里添加更详细的日志记录
             print(f"Error in affection command: {e}")
 
-    @app_commands.command(name="reset_all_affection", description="【管理员】重置所有用户的好感度为0")
-    @app_commands.default_permissions(administrator=True)
-    async def reset_all_affection(self, interaction: discord.Interaction):
-        """重置服务器内所有用户的好感度"""
-        await interaction.response.defer(ephemeral=True)
+    # @app_commands.command(name="reset_all_affection", description="【管理员】重置所有用户的好感度为0")
+    # @app_commands.default_permissions(administrator=True)
+    # async def reset_all_affection(self, interaction: discord.Interaction):
+    #     """重置服务器内所有用户的好感度"""
+    #     await interaction.response.defer(ephemeral=True)
         
-        if not interaction.guild:
-            await interaction.followup.send("此命令只能在服务器中使用。", ephemeral=True)
-            return
+    #     if not interaction.guild:
+    #         await interaction.followup.send("此命令只能在服务器中使用。", ephemeral=True)
+    #         return
             
-        try:
-            reset_count = await chat_db_manager.reset_all_affection_points(interaction.guild.id)
+    #     try:
+    #         reset_count = await chat_db_manager.reset_all_affection_points(interaction.guild.id)
             
-            await interaction.followup.send(
-                f"操作成功！已将服务器内 {reset_count} 名用户的好感度重置为 0。",
-                ephemeral=True
-            )
-            log.info(f"管理员 {interaction.user} 已重置服务器 {interaction.guild.id} 中所有用户的好感度。")
+    #         await interaction.followup.send(
+    #             f"操作成功！已将服务器内 {reset_count} 名用户的好感度重置为 0。",
+    #             ephemeral=True
+    #         )
+    #         log.info(f"管理员 {interaction.user} 已重置服务器 {interaction.guild.id} 中所有用户的好感度。")
 
-        except Exception as e:
-            log.error(f"重置所有用户好感度时出错: {e}", exc_info=True)
-            await interaction.followup.send("重置好感度时发生严重错误，请检查日志。", ephemeral=True)
+    #     except Exception as e:
+    #         log.error(f"重置所有用户好感度时出错: {e}", exc_info=True)
+    #         await interaction.followup.send("重置好感度时发生严重错误，请检查日志。", ephemeral=True)
 
 
-    @app_commands.command(name="set_affection", description="【管理员】设置指定用户的好感度分数")
-    @app_commands.describe(user="要修改好感度的用户", points="要设置的好感度分数")
-    @app_commands.default_permissions(administrator=True)
-    async def set_affection(self, interaction: discord.Interaction, user: discord.User, points: int):
-        """设置单个用户的好感度分数"""
-        await interaction.response.defer(ephemeral=True)
+    # @app_commands.command(name="set_affection", description="【管理员】设置指定用户的好感度分数")
+    # @app_commands.describe(user="要修改好感度的用户", points="要设置的好感度分数")
+    # @app_commands.default_permissions(administrator=True)
+    # async def set_affection(self, interaction: discord.Interaction, user: discord.User, points: int):
+    #     """设置单个用户的好感度分数"""
+    #     await interaction.response.defer(ephemeral=True)
         
-        if not interaction.guild:
-            await interaction.followup.send("此命令只能在服务器中使用。", ephemeral=True)
-            return
+    #     if not interaction.guild:
+    #         await interaction.followup.send("此命令只能在服务器中使用。", ephemeral=True)
+    #         return
             
-        try:
-            # 直接调用 db_manager 更新好感度
-            await chat_db_manager.update_affection(
-                user_id=user.id,
-                guild_id=interaction.guild.id,
-                affection_points=points
-            )
+    #     try:
+    #         # 直接调用 db_manager 更新好感度
+    #         await chat_db_manager.update_affection(
+    #             user_id=user.id,
+    #             guild_id=interaction.guild.id,
+    #             affection_points=points
+    #         )
             
-            # 获取更新后的状态以供显示
-            new_status = await self.affection_service.get_affection_status(user.id, interaction.guild.id)
+    #         # 获取更新后的状态以供显示
+    #         new_status = await self.affection_service.get_affection_status(user.id, interaction.guild.id)
             
-            await interaction.followup.send(
-                f"操作成功！已将用户 {user.mention} 的好感度设置为 **{points}**。\n"
-                f"当前等级为：**{new_status['level_name']}**。",
-                ephemeral=True
-            )
-            log.info(f"管理员 {interaction.user} 已将用户 {user.id} 的好感度设置为 {points}。")
+    #         await interaction.followup.send(
+    #             f"操作成功！已将用户 {user.mention} 的好感度设置为 **{points}**。\n"
+    #             f"当前等级为：**{new_status['level_name']}**。",
+    #             ephemeral=True
+    #         )
+    #         log.info(f"管理员 {interaction.user} 已将用户 {user.id} 的好感度设置为 {points}。")
 
-        except Exception as e:
-            log.error(f"设置用户 {user.id} 好感度时出错: {e}", exc_info=True)
-            await interaction.followup.send("设置好感度时发生严重错误，请检查日志。", ephemeral=True)
+    #     except Exception as e:
+    #         log.error(f"设置用户 {user.id} 好感度时出错: {e}", exc_info=True)
+    #         await interaction.followup.send("设置好感度时发生严重错误，请检查日志。", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

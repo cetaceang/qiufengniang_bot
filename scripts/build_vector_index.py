@@ -34,8 +34,8 @@ else:
 
 
 # 现在可以安全地导入项目模块
-from src.services.gemini_service import gemini_service
-from src.services.vector_db_service import vector_db_service
+from src.chat.services.gemini_service import gemini_service
+from src.chat.services.vector_db_service import vector_db_service
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

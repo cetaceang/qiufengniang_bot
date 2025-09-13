@@ -14,34 +14,34 @@ class BlackjackCog(commands.Cog):
         self.active_games = {}
         self.coin_service = coin_service
 
-    @app_commands.command(name="blackjack", description=TextConfig.BLACKJACK_DESCRIPTION)
-    async def blackjack(self, interaction: discord.Interaction):
-        user_id = interaction.user.id
-        if user_id in self.active_games:
-            await interaction.response.send_message(TextConfig.BLACKJACK_ALREADY_STARTED, ephemeral=True)
-            return
+    # @app_commands.command(name="blackjack", description=TextConfig.BLACKJACK_DESCRIPTION)
+    # async def blackjack(self, interaction: discord.Interaction):
+    #     user_id = interaction.user.id
+    #     if user_id in self.active_games:
+    #         await interaction.response.send_message(TextConfig.BLACKJACK_ALREADY_STARTED, ephemeral=True)
+    #         return
 
-        modal = BetModal(title="21点下注")
-        await interaction.response.send_modal(modal)
-        await modal.wait()
+    #     modal = BetModal(title="21点下注")
+    #     await interaction.response.send_modal(modal)
+    #     await modal.wait()
 
-        if not modal.is_submitted():
-            return
+    #     if not modal.is_submitted():
+    #         return
 
-        bet_amount = modal.amount
-        new_balance = await self.coin_service.remove_coins(user_id, bet_amount, "21点下注")
-        if new_balance is None:
-            await interaction.followup.send(TextConfig.GHOST_CARD_NOT_ENOUGH_COINS.format(bet_amount=bet_amount), ephemeral=True)
-            return
+    #     bet_amount = modal.amount
+    #     new_balance = await self.coin_service.remove_coins(user_id, bet_amount, "21点下注")
+    #     if new_balance is None:
+    #         await interaction.followup.send(TextConfig.GHOST_CARD_NOT_ENOUGH_COINS.format(bet_amount=bet_amount), ephemeral=True)
+    #         return
 
-        game = BlackjackService(self.bot, user_id, bet_amount)
-        game.start_game()
-        self.active_games[user_id] = game
+    #     game = BlackjackService(self.bot, user_id, bet_amount)
+    #     game.start_game()
+    #     self.active_games[user_id] = game
 
-        view = BlackjackView(self, game)
-        embed = self.create_game_embed(game)
+    #     view = BlackjackView(self, game)
+    #     embed = self.create_game_embed(game)
         
-        await interaction.followup.send(embed=embed, view=view)
+    #     await interaction.followup.send(embed=embed, view=view)
 
     def create_game_embed(self, game: BlackjackService, show_dealer_card: bool = False) -> discord.Embed:
         state = game.get_game_state(show_dealer_card)
