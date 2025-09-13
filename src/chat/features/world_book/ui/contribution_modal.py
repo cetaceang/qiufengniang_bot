@@ -1,9 +1,11 @@
 import discord
 import logging
+import asyncio
 from typing import Dict, Any
 
 # 导入 WorldBookService
 from src.chat.features.world_book.services.world_book_service import world_book_service
+from src.chat.features.world_book.services.incremental_rag_service import incremental_rag_service
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +87,13 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         
         # 根据保存结果发送相应的消息
         if success:
+            # 获取最后插入的条目ID
+            entry_id = await self._get_last_inserted_entry_id()
+            
+            if entry_id:
+                # 异步调用增量RAG处理（不阻塞用户响应）
+                asyncio.create_task(self._process_entry_for_rag(entry_id))
+            
             await interaction.response.send_message(
                 f"感谢您的贡献！您的知识条目已成功提交。\n\n类别: {category}\n标题: {title}\n内容: {content[:100]}{'...' if len(content) > 100 else ''}",
                 ephemeral=True
@@ -112,3 +121,32 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
                 ephemeral=True
             )
             log.error(f"用户 {interaction.user.id} 提交知识条目失败: category={category}, title={title}")
+    
+    async def _get_last_inserted_entry_id(self) -> str:
+        """获取最后插入的通用知识条目ID"""
+        # 这里需要实现获取最后插入条目的逻辑
+        # 由于WorldBookService的add_general_knowledge方法不返回ID，我们需要查询数据库
+        try:
+            # 使用world_book_service的数据库连接来查询
+            if hasattr(world_book_service, 'db_conn') and world_book_service.db_conn:
+                cursor = world_book_service.db_conn.cursor()
+                cursor.execute(
+                    "SELECT id FROM general_knowledge ORDER BY ROWID DESC LIMIT 1"
+                )
+                result = cursor.fetchone()
+                return result['id'] if result else None
+        except Exception as e:
+            log.error(f"获取最后插入的条目ID时出错: {e}", exc_info=True)
+        return None
+    
+    async def _process_entry_for_rag(self, entry_id: str):
+        """异步处理通用知识条目的RAG"""
+        try:
+            log.info(f"开始异步处理通用知识条目的RAG: {entry_id}")
+            success = await incremental_rag_service.process_general_knowledge(entry_id)
+            if success:
+                log.info(f"通用知识条目 {entry_id} 的RAG处理完成")
+            else:
+                log.warning(f"通用知识条目 {entry_id} 的RAG处理失败")
+        except Exception as e:
+            log.error(f"处理通用知识条目RAG时发生错误: {e}", exc_info=True)

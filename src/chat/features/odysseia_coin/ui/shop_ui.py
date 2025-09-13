@@ -2,7 +2,7 @@ import discord
 import logging
 from typing import List, Dict, Any
 
-from src.chat.features.odysseia_coin.service.coin_service import coin_service, PERSONAL_MEMORY_ITEM_EFFECT_ID, WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID
+from src.chat.features.odysseia_coin.service.coin_service import coin_service, PERSONAL_MEMORY_ITEM_EFFECT_ID, WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID, COMMUNITY_MEMBER_UPLOAD_EFFECT_ID
 from src.chat.features.personal_memory.services.personal_memory_service import personal_memory_service
 
 log = logging.getLogger(__name__)
@@ -176,11 +176,16 @@ class PurchaseButton(discord.ui.Button):
             
             # 如果购买成功且需要弹出模态框，则发送模态框
             if success and should_show_modal:
-                # 检查购买的商品是否是"知识纸条"
+                # 检查购买的商品类型
                 if selected_item['effect_id'] == WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID:
                     # 导入世界之书贡献模态框类
                     from src.chat.features.world_book.ui.contribution_modal import WorldBookContributionModal
                     modal = WorldBookContributionModal()
+                    await interaction.response.send_modal(modal)
+                elif selected_item['effect_id'] == COMMUNITY_MEMBER_UPLOAD_EFFECT_ID:
+                    # 导入社区成员档案上传模态框类
+                    from src.chat.features.community_member.ui.community_member_modal import CommunityMemberUploadModal
+                    modal = CommunityMemberUploadModal()
                     await interaction.response.send_modal(modal)
                 else:
                     # 导入个人档案模态框类

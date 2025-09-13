@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 # --- 特殊商品效果ID ---
 PERSONAL_MEMORY_ITEM_EFFECT_ID = "unlock_personal_memory"
 WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID = "contribute_to_world_book"
+COMMUNITY_MEMBER_UPLOAD_EFFECT_ID = "upload_community_member"
 
 
 class CoinService:
@@ -307,6 +308,9 @@ class CoinService:
                     return True, f"你已成功解锁 **{item['name']}**！现在类脑娘将开始为你记录个人记忆。", new_balance, True
             elif item_effect == WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID:
                 # 购买"知识纸条"商品，需要弹出模态窗口
+                return True, f"你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**。", new_balance, True
+            elif item_effect == COMMUNITY_MEMBER_UPLOAD_EFFECT_ID:
+                # 购买"社区成员档案上传"商品，需要弹出模态窗口
                 return True, f"你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**。", new_balance, True
             else:
                 # 其他未知效果，暂时先放入背包
