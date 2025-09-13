@@ -207,19 +207,21 @@ class ContextService:
 
             # --- 新增：获取并注入用户个人档案 ---
             user_profile_prompt = ""
+            log.info(f"--- 个人档案注入诊断: 正在为用户 {user_id} 查找档案 ---")
             user_profile = world_book_service.get_profile_by_discord_id(str(user_id))
+            log.info(f"--- 个人档案注入诊断: world_book_service 返回的档案: {user_profile} ---")
             if user_profile:
-                log.info(f"从 world_book_service 获取到的用户档案: {user_profile}") # 添加日志
                 # 找到档案，进行格式化
                 profile_content = user_profile.get('content', {})
                 if isinstance(profile_content, dict):
                     # 只有当值不为空时，才添加到列表中
                     profile_details = [f"{key}: {value}" for key, value in profile_content.items() if value and value != '未提供']
-                    log.info(f"格式化后的用户档案详情 (profile_details): {profile_details}") # 添加日志
+                    log.info(f"--- 个人档案注入诊断: 过滤后的档案详情: {profile_details} ---")
                     if profile_details: # 只有当列表不为空时才生成提示
                         # 使用 \n\n 来增加与好感度提示之间的间距
                         user_profile_prompt = "\n\n这是与你对话的用户的已知信息：\n" + "\n".join(profile_details)
             
+            log.info(f"--- 个人档案注入诊断: 最终生成的档案提示长度: {len(user_profile_prompt)} ---")
             # 使用 \n\n 来增加与档案或好感度提示之间的间距
             model_reply = f"好的,上面是已知的历史消息,我会针对用户的最新消息进行回复。{affection_level_prompt}{user_profile_prompt}"
             

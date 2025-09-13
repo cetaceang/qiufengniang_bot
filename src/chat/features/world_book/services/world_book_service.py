@@ -23,18 +23,16 @@ class WorldBookService:
     def __init__(self, gemini_svc: GeminiService, vector_db_svc: VectorDBService):
         self.gemini_service = gemini_svc
         self.vector_db_service = vector_db_svc
-        self.db_conn = self._connect_db()
         log.info("WorldBookService (RAG + SQLite version) 初始化完成。")
 
-    def _connect_db(self):
-        """建立到 SQLite 数据库的连接"""
+    def _get_db_connection(self):
+        """建立并返回一个新的 SQLite 数据库连接。"""
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.row_factory = sqlite3.Row
-            log.info(f"成功连接到世界书数据库: '{DB_PATH}'")
             return conn
         except sqlite3.Error as e:
-            log.error(f"连接到世界书数据库失败: {e}", exc_info=True)
+            log.error(f"连接到世界书数据库 '{DB_PATH}' 失败: {e}", exc_info=True)
             return None
 
     def get_profile_by_discord_id(self, discord_id: str) -> Optional[Dict[str, Any]]:
@@ -47,21 +45,28 @@ class WorldBookService:
         Returns:
             如果找到匹配的成员，则返回该成员的完整条目字典，否则返回 None。
         """
-        if not discord_id or not self.db_conn:
+        if not discord_id:
             return None
         
-        cursor = self.db_conn.cursor()
-        cursor.execute(
-            "SELECT * FROM community_members WHERE discord_number_id = ?",
-            (str(discord_id),)
-        )
-        member_row = cursor.fetchone()
+        conn = self._get_db_connection()
+        if not conn:
+            return None
         
-        if member_row:
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM community_members WHERE discord_number_id = ?",
+                (str(discord_id),)
+            )
+            member_row = cursor.fetchone()
+
+            if not member_row:
+                return None
+
             member_dict = dict(member_row)
-            log.info(f"成功通过 Discord ID '{discord_id}' 找到了社区成员 '{member_dict.get('id')}' 的档案。")
-            log.info(f"数据库原始数据 (member_row): {member_row}") # 添加日志
-            
+            log.debug(f"成功通过 Discord ID '{discord_id}' 找到了社区成员 '{member_dict.get('id')}' 的档案。")
+            log.debug(f"数据库原始数据 (member_row): {member_row}")
+
             # 获取关联的昵称
             cursor.execute(
                 "SELECT nickname FROM member_discord_nicknames WHERE member_id = ?",
@@ -69,16 +74,20 @@ class WorldBookService:
             )
             nicknames = [row['nickname'] for row in cursor.fetchall()]
             member_dict['discord_nickname'] = nicknames
-            
+
             # 解析 content_json
             if member_dict.get('content_json'):
                 member_dict['content'] = json.loads(member_dict['content_json'])
-                del member_dict['content_json'] # 清理掉原始json字段
-            
-            log.info(f"解析后的用户档案 (member_dict): {member_dict}") # 添加日志
+                del member_dict['content_json']
+
+            log.debug(f"解析后的用户档案 (member_dict): {member_dict}")
             return member_dict
-            
-        return None
+        except sqlite3.Error as e:
+            log.error(f"通过 Discord ID '{discord_id}' 查找档案时发生数据库错误: {e}", exc_info=True)
+            return None
+        finally:
+            if conn:
+                conn.close()
 
     def is_ready(self) -> bool:
         """检查服务是否已准备好（所有依赖项都可用）。"""
@@ -122,7 +131,7 @@ class WorldBookService:
             # 通过一个独特的标记来识别这条系统消息
             if "我会按好感度和上下文综合回复" in history_for_rag[-1].get("parts", [""])[0]:
                 history_for_rag.pop()
-                log.info("已为RAG总结移除系统注入的上下文提示。")
+                log.debug("已为RAG总结移除系统注入的上下文提示。")
 
         summarized_query = await self.gemini_service.summarize_for_rag(
             latest_query=latest_query,
@@ -154,7 +163,7 @@ class WorldBookService:
             )
             
             if search_results:
-                log.info(f"RAG 搜索简报 (ID 和 距离): {[f'{r['id']}({r['distance']:.4f})' for r in search_results]}")
+                log.debug(f"RAG 搜索简报 (ID 和 距离): {[f'{r['id']}({r['distance']:.4f})' for r in search_results]}")
 
             return search_results
         except Exception as e:

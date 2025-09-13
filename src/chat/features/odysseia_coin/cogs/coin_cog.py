@@ -5,7 +5,7 @@ from discord.ext import commands
 
 from src.chat.features.odysseia_coin.service.coin_service import coin_service
 from src.chat.features.odysseia_coin.ui.shop_ui import SimpleShopView
-from src import config
+from src.chat.config import chat_config
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class CoinCog(commands.Cog):
                 if author.bot:
                     return
                     
-                reward_amount = config.COIN_CONFIG["FORUM_POST_REWARD"]
+                reward_amount = chat_config.COIN_CONFIG["FORUM_POST_REWARD"]
                 reason = f"在频道 {thread.parent.name} 发布新帖"
                 new_balance = await coin_service.add_coins(author.id, reward_amount, reason)
                 log.info(f"用户 {author.name} ({author.id}) 因发帖获得 {reward_amount} 类脑币。新余额: {new_balance}")
@@ -127,3 +127,4 @@ class CoinCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(CoinCog(bot))
+

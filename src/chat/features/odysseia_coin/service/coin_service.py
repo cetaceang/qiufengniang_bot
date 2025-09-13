@@ -18,7 +18,7 @@ class CoinService:
     """处理与类脑币相关的所有业务逻辑"""
 
     def __init__(self):
-        self.db_path = chat_db_manager.db_path
+        pass
 
     async def get_balance(self, user_id: int) -> int:
         """获取用户的类脑币余额"""
@@ -38,7 +38,7 @@ class CoinService:
             import sqlite3
             conn = None
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(chat_db_manager.db_path)
                 cursor = conn.cursor()
                 # 插入或更新用户余额
                 cursor.execute("""
@@ -87,7 +87,7 @@ class CoinService:
             import sqlite3
             conn = None
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(chat_db_manager.db_path)
                 cursor = conn.cursor()
                 # 更新余额
                 cursor.execute("UPDATE user_coins SET balance = balance - ? WHERE user_id = ?", (amount, user_id))
@@ -127,7 +127,7 @@ class CoinService:
             import sqlite3
             conn = None
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(chat_db_manager.db_path)
                 cursor = conn.cursor()
                 cursor.execute("SELECT last_daily_message_date FROM user_coins WHERE user_id = ?", (user_id,))
                 result = cursor.fetchone()
@@ -261,7 +261,7 @@ class CoinService:
                     import sqlite3
                     conn = None
                     try:
-                        conn = sqlite3.connect(self.db_path)
+                        conn = sqlite3.connect(chat_db_manager.db_path)
                         cursor = conn.cursor()
                         cursor.execute("""
                             UPDATE user_coins
@@ -327,7 +327,7 @@ class CoinService:
             import sqlite3
             conn = None
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(chat_db_manager.db_path)
                 cursor = conn.cursor()
                 cursor.execute("SELECT inventory_id FROM user_inventory WHERE user_id = ? AND item_id = ?", (user_id, item_id))
                 existing = cursor.fetchone()

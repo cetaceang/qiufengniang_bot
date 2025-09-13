@@ -32,9 +32,19 @@ class ContextServiceTest:
             log.error("ContextServiceTest 的 bot 实例未设置，无法获取频道消息历史。")
             return []
 
-        channel = self.bot.get_channel(channel_id)
-        if not channel or not isinstance(channel, discord.TextChannel):
-            log.warning(f"未找到或无效的文本频道 ID: {channel_id}")
+        channel = self.bot.get_channel(channel_id) or self.bot.get_thread(channel_id)
+        if not channel:
+            try:
+                # 作为备用方案，尝试通过API获取，这可以找到公开帖子
+                channel = await self.bot.fetch_channel(channel_id)
+                log.info(f"通过 fetch_channel 成功获取到频道/帖子: {channel.name} (ID: {channel_id})")
+            except (discord.NotFound, discord.Forbidden):
+                log.warning(f"无法通过 get_channel 或 fetch_channel 找到 ID 为 {channel_id} 的频道或帖子。")
+                return []
+        
+        # 检查是否是支持消息历史的类型
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            log.warning(f"频道 ID {channel_id} 的类型为 {type(channel)}，不支持读取消息历史。")
             return []
 
         history_parts = []
@@ -100,7 +110,7 @@ class ContextServiceTest:
             
             # 1. 将所有历史记录打包成一个 user 消息作为背景
             if history_parts:
-                background_prompt = "以上是历史对话和相关背景信息，请你只针对用户的最新消息进行回复：\n\n" + "\n\n".join(history_parts)
+                background_prompt = "以下是历史对话和相关背景信息，请你只针对用户的最新消息进行回复：\n\n" + "\n\n".join(history_parts)
                 final_context.append({
                     "role": "user",
                     "parts": [background_prompt]
@@ -111,14 +121,18 @@ class ContextServiceTest:
             affection_level_prompt = affection_status.get("prompt", "")
             
             user_profile_prompt = ""
+            log.debug(f"--- 个人档案注入诊断 (Test Service): 正在为用户 {user_id} 查找档案 ---")
             user_profile = world_book_service.get_profile_by_discord_id(str(user_id))
+            log.debug(f"--- 个人档案注入诊断 (Test Service): world_book_service 返回的档案: {user_profile} ---")
             if user_profile:
                 profile_content = user_profile.get('content', {})
                 if isinstance(profile_content, dict):
                     profile_details = [f"{key}: {value}" for key, value in profile_content.items() if value and value != '未提供']
+                    log.debug(f"--- 个人档案注入诊断 (Test Service): 过滤后的档案详情: {profile_details} ---")
                     if profile_details:
                         user_profile_prompt = "\n\n这是与你对话的用户的已知信息：\n" + "\n".join(profile_details)
             
+            log.debug(f"--- 个人档案注入诊断 (Test Service): 最终生成的档案提示长度: {len(user_profile_prompt)} ---")
             model_reply = f"好的,我已了解以上背景信息,会针对用户的最新消息进行回复。{affection_level_prompt}{user_profile_prompt}"
             final_context.append({
                 "role": "model",

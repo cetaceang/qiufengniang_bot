@@ -147,38 +147,38 @@ class PersonalMemoryService:
         增加用户的个人消息计数，并返回新的计数值。
         guild_id 用于区分私聊 (0) 和频道对话。
         """
-        log.info(f"开始为用户 {user_id} 在 guild_id {guild_id} 增加个人消息计数。")
+        log.debug(f"开始为用户 {user_id} 在 guild_id {guild_id} 增加个人消息计数。")
         new_count = await self.db_manager.increment_personal_message_count(user_id, guild_id=guild_id)
-        log.info(f"用户 {user_id} 在 guild_id {guild_id} 的个人消息计数已更新为: {new_count}")
+        log.debug(f"用户 {user_id} 在 guild_id {guild_id} 的个人消息计数已更新为: {new_count}")
         return new_count
 
     async def reset_message_count(self, user_id: int, guild_id: int):
         """重置用户在指定 guild_id 下的个人消息计数器。"""
         await self.db_manager.reset_personal_message_count(user_id, guild_id=guild_id)
-        log.info(f"已重置用户 {user_id} 在 guild_id {guild_id} 的个人消息计数器。")
+        log.debug(f"已重置用户 {user_id} 在 guild_id {guild_id} 的个人消息计数器。")
 
 
     async def summarize_and_save_memory(self, user_id: int, guild_id: int):
         """获取用户的对话历史（根据 guild_id 区分私聊和频道），生成摘要，并保存到数据库。"""
-        log.info(f"=== 开始为用户 {user_id} 在 guild_id {guild_id} 生成个人记忆摘要 ===")
+        log.debug(f"=== 开始为用户 {user_id} 在 guild_id {guild_id} 生成个人记忆摘要 ===")
         
         # 1. 获取对话历史
-        log.info(f"步骤 1: 正在为用户 {user_id} 获取 guild_id {guild_id} 的对话历史...")
+        log.debug(f"步骤 1: 正在为用户 {user_id} 获取 guild_id {guild_id} 的对话历史...")
         context = await self.db_manager.get_ai_conversation_context(user_id, guild_id)
         
         if not context:
             log.warning(f"用户 {user_id} 在 guild_id {guild_id} 没有对话上下文记录。")
             return
             
-        log.info(f"获取到的上下文结构: {list(context.keys()) if context else 'None'}")
+        log.debug(f"获取到的上下文结构: {list(context.keys()) if context else 'None'}")
             
         if not context or not context['conversation_history']:
             log.warning(f"用户 {user_id} 在 guild_id {guild_id} 没有可供总结的对话历史。")
-            log.info(f"对话历史内容: {context['conversation_history'] if context else 'No context'}")
+            log.debug(f"对话历史内容: {context['conversation_history'] if context else 'No context'}")
             return
 
         conversation_history = context['conversation_history']
-        log.info(f"对话历史长度: {len(conversation_history)} 条消息")
+        log.debug(f"对话历史长度: {len(conversation_history)} 条消息")
         
         # 2. 格式化对话历史为纯文本
         dialogue_text = ""
@@ -192,10 +192,10 @@ class PersonalMemoryService:
 
         if not dialogue_text.strip():
             log.warning(f"用户 {user_id} 的对话历史为空或格式不正确，无法总结。")
-            log.info(f"原始对话历史: {conversation_history}")
+            log.debug(f"原始对话历史: {conversation_history}")
             return
             
-        log.info(f"格式化后的对话文本长度: {len(dialogue_text)} 字符")
+        log.debug(f"格式化后的对话文本长度: {len(dialogue_text)} 字符")
             
         # 3. 构建 Prompt 并调用 AI 生成摘要
         prompt_template = PROMPT_CONFIG.get("personal_memory_summary")
@@ -204,10 +204,10 @@ class PersonalMemoryService:
             return
             
         final_prompt = prompt_template.format(dialogue_history=dialogue_text)
-        log.info(f"步骤 2: 构建总结Prompt完成，长度: {len(final_prompt)} 字符")
+        log.debug(f"步骤 2: 构建总结Prompt完成，长度: {len(final_prompt)} 字符")
         log.debug(f"完整Prompt预览: {final_prompt[:200]}...")
         
-        log.info("步骤 3: 调用AI生成摘要...")
+        log.debug("步骤 3: 调用AI生成摘要...")
         summary = await gemini_service.generate_text(
             prompt=final_prompt,
             temperature=0.5,
@@ -216,17 +216,17 @@ class PersonalMemoryService:
         
         # 4. 保存摘要到数据库
         if summary:
-            log.info(f"步骤 4: 成功为用户 {user_id} 生成摘要，长度: {len(summary)} 字符")
+            log.debug(f"步骤 4: 成功为用户 {user_id} 生成摘要，长度: {len(summary)} 字符")
             log.debug(f"摘要内容预览: {summary[:100]}...")
             
             user_profile = await self.db_manager.get_user_profile(user_id)
             old_summary = user_profile['personal_summary'] if user_profile and user_profile['personal_summary'] else ''
             
             if old_summary and old_summary.strip():
-                log.info("检测到已有旧摘要，将进行合并")
+                log.debug("检测到已有旧摘要，将进行合并")
                 new_summary = f"{old_summary}\n\n---\n\n{summary}"
             else:
-                log.info("没有旧摘要，创建新摘要")
+                log.debug("没有旧摘要，创建新摘要")
                 new_summary = summary
 
             await self.db_manager.update_personal_summary(user_id, new_summary)
@@ -236,9 +236,9 @@ class PersonalMemoryService:
             
         # 无论总结成功与否，都重置计数器
         await self.reset_message_count(user_id, guild_id)
-        log.info(f"步骤 6: 已重置用户 {user_id} 在 guild_id {guild_id} 的消息计数器。")
+        log.debug(f"步骤 6: 已重置用户 {user_id} 在 guild_id {guild_id} 的消息计数器。")
             
-        log.info(f"=== 用户 {user_id} 的个人记忆摘要生成过程结束 ===")
+        log.debug(f"=== 用户 {user_id} 的个人记忆摘要生成过程结束 ===")
 
 
     async def unlock_feature(self, user_id: int):

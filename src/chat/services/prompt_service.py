@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 class PromptService:
     """
     负责构建与大语言模型交互所需的各种复杂提示（Prompt）。
+    采用分层注入式结构，动态解析并构建对话历史。
     """
 
     def build_chat_prompt(
@@ -29,54 +30,49 @@ class PromptService:
         personal_summary: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        构建用于AI聊天的完整对话历史和系统提示。
+        构建用于AI聊天的分层对话历史。
 
-        Args:
-            user_name (str): 用户名。
-            message (Optional[str]): 用户当前的消息文本。
-            images (Optional[List[Dict]]): 用户当前消息附带的图片。
-            channel_context (Optional[List[Dict]]): 频道的历史消息上下文。
-            world_book_entries (Optional[List[Dict]]): 从世界书中检索到的相关条目。
-            affection_status (Dict[str, Any]): 用户的好感度状态。
-            personal_summary (Optional[str]): 用户的个人记忆摘要。
-
-        Returns:
-            List[Dict[str, Any]]: 构建完成，可直接发送给 Gemini API 的对话列表。
+        此方法将单一的系统提示动态拆分为多个部分，并按顺序注入到对话历史中，
+        形成一个结构化的、引导式的上下文，以提高AI的稳定性和可控性。
         """
-        # 1. --- 构建动态系统提示 ---
+        final_conversation = []
+
+        # --- 1. 核心身份注入 ---
+        # 准备动态填充内容
         beijing_tz = timezone(timedelta(hours=8))
         current_beijing_time = datetime.now(beijing_tz).strftime('%Y年%m月%d日 %H:%M')
-
-        world_book_formatted_content = self._format_world_book_entries(world_book_entries)
-        subject_name = world_book_entries[0].get('id', '多个主题') if world_book_entries else '对方'
-        affection_level_prompt = affection_status.get("prompt", "")
-
-        # 准备个人记忆和频道上下文
-        personal_summary_content = f"\n以下是关于用户 {user_name} 的个人记忆，请在对话中参考：\n{personal_summary}\n" if personal_summary else ""
-        channel_specific_content = "" # 预留，未来可以从数据库获取频道特定人设
-
-        dynamic_system_prompt = SYSTEM_PROMPT.format(
+        # 动态知识块（世界之书、个人记忆）将作为独立消息注入，无需在此处处理占位符
+        core_prompt_template = SYSTEM_PROMPT
+        
+        # 填充核心提示词
+        # 填充核心提示词中真正存在的占位符
+        core_prompt = core_prompt_template.format(
             current_time=current_beijing_time,
-            user_name=user_name,
-            world_book_content=world_book_formatted_content,
-            affection_level_prompt=affection_level_prompt,
-            subject_name=subject_name,
-            personal_summary=personal_summary_content,
-            channel_specific_context=channel_specific_content
+            user_name=user_name
         )
+        
+        final_conversation.append({"role": "user", "parts": [core_prompt]})
+        final_conversation.append({"role": "model", "parts": ["好的，我是类脑娘，已经准备好了"]})
 
-        # 2. --- 初始化对话历史 ---
-        final_conversation = [
-            {"role": "user", "parts": [dynamic_system_prompt]},
-            {"role": "model", "parts": ["好的，我明白了。"]}
-        ]
+        # --- 2. 动态知识注入 ---
+        # 注入世界之书 (RAG) 内容
+        world_book_formatted_content = self._format_world_book_entries(world_book_entries, user_name)
+        if world_book_formatted_content:
+            final_conversation.append({"role": "user", "parts": [world_book_formatted_content]})
+            final_conversation.append({"role": "model", "parts": ["我记下了"]})
 
-        # 3. --- 合并频道上下文 ---
+        # 注入个人记忆
+        if personal_summary:
+            personal_summary_content = f"这是关于用户 {user_name} 的一些个人记忆，请在对话中参考：\n<personal_memory>\n{personal_summary}\n</personal_memory>"
+            final_conversation.append({"role": "user", "parts": [personal_summary_content]})
+            final_conversation.append({"role": "model", "parts": ["关于你的事情，我当然都记得"]})
+
+        # --- 3. 频道历史上下文注入 ---
         if channel_context:
             final_conversation.extend(channel_context)
             log.debug(f"已合并频道上下文，长度为: {len(channel_context)}")
 
-        # 4. --- 处理当前用户输入（文本和图片） ---
+        # --- 4. 当前用户输入注入 ---
         current_user_parts = []
         text_part_content = ""
         if message:
@@ -98,18 +94,19 @@ class PromptService:
                     except Exception as e:
                         log.error(f"Pillow 无法打开图片附件 {i+1}。错误: {e}。")
         
-        # 5. --- 将当前输入追加到对话历史 ---
         if current_user_parts:
-            # 如果最后一条消息也是'user'，则将当前消息合并进去，以避免API错误
+            # Gemini API 不允许连续的 'user' 角色消息。
+            # 如果频道历史的最后一条是 'user'，我们需要将当前输入合并进去。
             if final_conversation and final_conversation[-1].get("role") == "user":
                 final_conversation[-1]["parts"].extend(current_user_parts)
+                log.debug("将当前用户输入合并到上一条 'user' 消息中。")
             else:
                 final_conversation.append({"role": "user", "parts": current_user_parts})
 
         return final_conversation
 
-    def _format_world_book_entries(self, entries: Optional[List[Dict]]) -> str:
-        """将世界书条目列表格式化为字符串。"""
+    def _format_world_book_entries(self, entries: Optional[List[Dict]], user_name: str) -> str:
+        """将世界书条目列表格式化为独立的知识注入消息。"""
         if not entries:
             return ""
         
@@ -119,10 +116,16 @@ class PromptService:
             if isinstance(content_value, list) and content_value:
                 all_contents.append(str(content_value[0]))
             elif isinstance(content_value, str):
-                all_contents.append(content_value)
+                # 过滤掉包含“未提供”的行
+                filtered_lines = [line for line in content_value.split('\n') if '未提供' not in line]
+                if filtered_lines:
+                    all_contents.append('\n'.join(filtered_lines))
         
         if all_contents:
-            return "<world_book_context>\n" + "\n---\n".join(all_contents) + "\n</world_book_context>"
+            subject_name = entries[0].get('id', '多个主题')
+            header = f"这是关于 '{subject_name}' 的一些背景知识，请你在与 {user_name} 的对话中参考：\n"
+            body = "\n---\n".join(all_contents)
+            return f"{header}<world_book_context>\n{body}\n</world_book_context>"
         
         return ""
 

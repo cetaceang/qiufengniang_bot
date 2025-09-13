@@ -233,7 +233,7 @@ class GeminiService:
             try:
                 # 使用 _serialize_parts_for_error_logging 来避免截断长文本
                 logged_payload = json.dumps(final_conversation, indent=2, ensure_ascii=False, default=self._serialize_parts_for_error_logging)
-                log.info(f"--- Final Context to Gemini API (User: {user_id}) ---\n"
+                log.debug(f"--- Final Context to Gemini API (User: {user_id}) ---\n"
                          f"{logged_payload}\n"
                          f"----------------------------------------------------")
             except Exception as log_e:
@@ -252,7 +252,7 @@ class GeminiService:
                 if not client:
                     continue
 
-                log.info(f"正在使用 API 密钥 #{self.current_key_index} 为用户 {user_id} 生成回复...")
+                log.debug(f"正在使用 API 密钥 #{self.current_key_index} 为用户 {user_id} 生成回复...")
 
                 try:
                     loop = asyncio.get_event_loop()
@@ -274,7 +274,7 @@ class GeminiService:
                         )
                         
                         formatted_response = await self._post_process_response(raw_ai_response, user_id, guild_id)
-                        log.info(f"即将为用户 {user_id} 返回AI回复: {formatted_response}")
+                        # log.info(f"即将为用户 {user_id} 返回AI回复: {formatted_response}") # 这条日志将移至 chat_service
                         return formatted_response
                     
                     elif response.prompt_feedback and response.prompt_feedback.block_reason:
@@ -331,7 +331,7 @@ class GeminiService:
             if not client:
                 continue
 
-            log.info(f"正在使用 API 密钥 #{self.current_key_index} 为文本生成嵌入...")
+            log.debug(f"正在使用 API 密钥 #{self.current_key_index} 为文本生成嵌入...")
             
             try:
                 loop = asyncio.get_event_loop()
@@ -339,7 +339,7 @@ class GeminiService:
                 embed_config = types.EmbedContentConfig(task_type=task_type)
                 if title and task_type == "retrieval_document":
                     embed_config.title = title
-                    log.info(f"      -> 使用标题 '{title}' 进行文档嵌入。")
+                    log.debug(f"      -> 使用标题 '{title}' 进行文档嵌入。")
 
                 embedding_result = await loop.run_in_executor(
                     self.executor,
@@ -351,7 +351,7 @@ class GeminiService:
                 )
                 
                 if embedding_result and embedding_result.embeddings:
-                    log.info(f"成功为文本生成嵌入向量。")
+                    log.debug(f"成功为文本生成嵌入向量。")
                     return embedding_result.embeddings[0].values
                 else:
                     log.warning(f"API 密钥 #{self.current_key_index} 未能生成有效的嵌入。")
@@ -389,7 +389,7 @@ class GeminiService:
             if not client:
                 continue
 
-            log.info(f"正在使用 API 密钥 #{self.current_key_index} (generate_text) 生成文本...")
+            log.debug(f"正在使用 API 密钥 #{self.current_key_index} (generate_text) 生成文本...")
             try:
                 loop = asyncio.get_event_loop()
                 
@@ -400,7 +400,7 @@ class GeminiService:
                 gen_config = types.GenerateContentConfig(**gen_config_params)
 
                 final_model_name = model_name or self.model_name
-                log.info(f"generate_text 将使用模型: {final_model_name}")
+                log.debug(f"generate_text 将使用模型: {final_model_name}")
 
                 response = await loop.run_in_executor(
                     self.executor,
@@ -413,7 +413,7 @@ class GeminiService:
 
                 if response.parts:
                     rewritten_query = response.text.strip()
-                    log.info(f"成功生成文本 (generate_text): \"{rewritten_query}\"")
+                    log.debug(f"成功生成文本 (generate_text): \"{rewritten_query}\"")
                     return rewritten_query
                 else:
                     log.warning(f"API 密钥 #{self.current_key_index} (generate_text) 未能生成有效文本。")

@@ -44,23 +44,23 @@ class ChatService:
         if has_personal_memory:
             personal_summary = user_profile['personal_summary']
             # 在所有对话中进行消息计数和触发总结
-            log.info(f"--- 个人记忆诊断: 用户 {author.id} ---")
-            log.info(f"步骤 1: 检查 has_personal_memory 状态。值为: {has_personal_memory}")
+            log.debug(f"--- 个人记忆诊断: 用户 {author.id} ---")
+            log.debug(f"步骤 1: 检查 has_personal_memory 状态。值为: {has_personal_memory}")
             
             # 在所有对话中进行消息计数和触发总结
             log.debug(f"用户 {author.id} 已启用个人记忆，开始计数。")
             new_count = await personal_memory_service.increment_and_check_message_count(author.id, guild_id)
-            log.info(f"步骤 2: 消息计数器更新。新计数值为: {new_count}")
+            log.debug(f"步骤 2: 消息计数器更新。新计数值为: {new_count}")
             
             summary_threshold = PERSONAL_MEMORY_CONFIG['summary_threshold']
-            log.info(f"步骤 3: 检查是否达到阈值。当前计数: {new_count}, 阈值: {summary_threshold}")
+            log.debug(f"步骤 3: 检查是否达到阈值。当前计数: {new_count}, 阈值: {summary_threshold}")
             
             if new_count >= summary_threshold:
                 log.info(f"用户 {author.id} 在 guild_id {guild_id} 的个人消息已达到 {new_count} 条，触发总结。")
                 await personal_memory_service.summarize_and_save_memory(author.id, guild_id)
                 await personal_memory_service.reset_message_count(author.id, guild_id)
             else:
-                log.info(f"用户 {author.id} 在 guild_id {guild_id} 的个人消息计数 {new_count} 尚未达到阈值 {summary_threshold}，不触发总结。")
+                log.debug(f"用户 {author.id} 在 guild_id {guild_id} 的个人消息计数 {new_count} 尚未达到阈值 {summary_threshold}，不触发总结。")
          
         # 移除了对未开启个人记忆的私聊消息的特殊处理
 
@@ -96,11 +96,33 @@ class ChatService:
                 conversation_history=channel_context
             )
 
-            # 3. --- 调用AI生成回复 ---
+            # 3. --- 好感度与奖励更新（前置） ---
+            try:
+                # 在生成回复前更新好感度，以确保日志顺序正确
+                await affection_service.increase_affection_on_message(author.id, guild_id)
+            except Exception as aff_e:
+                log.error(f"增加用户 {author.id} 的好感度时出错: {aff_e}")
+            
+            try:
+                # 发放每日首次对话奖励
+                if await coin_service.grant_daily_message_reward(author.id):
+                    log.info(f"已为用户 {author.id} 发放每日首次对话奖励。")
+            except Exception as coin_e:
+                log.error(f"为用户 {author.id} 发放每日对话奖励时出错: {coin_e}")
+
+            # 4. --- 调用AI生成回复 ---
+            # 检查 channel_context 的最后一条消息是否已经是用户的最新消息
+            # 如果是，则将 message 参数设为 None，以避免重复
+            message_to_send = final_content if final_content.strip() else None
+            if channel_context and channel_context[-1].get("role") == "user":
+                # 假设 channel_context 最后一条 user 消息已经包含了用户输入
+                # 为了避免重复，我们不发送 final_content
+                message_to_send = None
+            
             ai_response = await gemini_service.generate_response(
                 author.id,
                 guild_id,
-                final_content if final_content.strip() else None,
+                message_to_send,
                 images=image_data_list if image_data_list else None,
                 user_name=author.display_name,
                 channel_context=channel_context,
@@ -113,14 +135,14 @@ class ChatService:
                 log.info(f"AI服务未返回回复（可能由于冷却），跳过用户 {author.id}。")
                 return None
 
-            # 4. --- 后处理与格式化 ---
+            # 5. --- 后处理与格式化 ---
             final_response = self._format_ai_response(ai_response)
             
-            # 5. --- 异步执行后续任务（不阻塞回复） ---
-            # 在回复之后执行奖励和好感度更新
-            await self._perform_post_response_tasks(author, guild_id, final_content, world_book_entries, final_response)
+            # 6. --- 异步执行后续任务（不阻塞回复） ---
+            # 此处现在只应包含不影响核心回复流程的日志记录等任务
+            # self._log_rag_summary(author, final_content, world_book_entries, final_response)
 
-            log.info(f"已为用户 {author} 生成AI回复")
+            log.info(f"已为用户 {author.display_name} 生成AI回复: {final_response}")
             return final_response
 
         except Exception as e:
@@ -137,22 +159,12 @@ class ChatService:
         return ai_response.replace('\n\n', '\n')
 
     async def _perform_post_response_tasks(self, author: discord.User, guild_id: int, query: str, rag_entries: list, response: str):
-        """执行发送回复后的任务，如增加好感度、发放奖励和记录日志。"""
-        try:
-            # 增加好感度
-            await affection_service.increase_affection_on_message(author.id, guild_id)
-        except Exception as aff_e:
-            log.error(f"增加用户 {author.id} 的好感度时出错: {aff_e}")
-
-        try:
-            # 发放每日首次对话奖励
-            if await coin_service.grant_daily_message_reward(author.id):
-                log.info(f"已为用户 {author.id} 发放每日首次对话奖励。")
-        except Exception as coin_e:
-            log.error(f"为用户 {author.id} 发放每日对话奖励时出错: {coin_e}")
+        """执行发送回复后的任务，如记录日志。"""
+        # 好感度和奖励逻辑已前置，此处保留用于未来可能的其他后处理任务
         
         # 记录 RAG 诊断日志
         # self._log_rag_summary(author, query, rag_entries, response)
+        pass
 
     def _log_rag_summary(self, author: discord.User, query: str, entries: list, response: str):
         """生成并记录 RAG 诊断摘要日志。"""
