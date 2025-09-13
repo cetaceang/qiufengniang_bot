@@ -22,9 +22,9 @@ QUERY_REWRITING_MODEL = "gemini-2.5-flash-lite"
 # --- Gemini Service 配置 ---
 GEMINI_CHAT_CONFIG = {
     "temperature": 1.1,
-    "top_p": 0.99,
-    "top_k": 60,
-    "max_output_tokens": 400,
+    "top_p": 0.97,
+    "top_k": 50,
+    "max_output_tokens": 300,
 }
 
 GEMINI_TEXT_GEN_CONFIG = {
@@ -38,7 +38,7 @@ COOLDOWN_RATES = {
 }
 
 # (min, max) 分钟
-BLACKLIST_BAN_DURATION_MINUTES = (5, 10)
+BLACKLIST_BAN_DURATION_MINUTES = (30, 60)
 
 
 # --- 类脑币系统 ---

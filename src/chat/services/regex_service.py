@@ -35,8 +35,8 @@ class RegexService:
         text = re.sub(r'[\(（][^)）]*[\)）]:?\s*', '', text)
         # 匹配 [], 【】
         text = re.sub(r'[\[【][^\]】]*[\]】]:?\s*', '', text)
-        # 匹配 <>, 《》
-        text = re.sub(r'[<《][^>》]*[>》]:?\s*', '', text)
+        # 匹配 <>
+        text = re.sub(r'[<][^>]*[>]:?\s*', '', text)
         
         return text.strip()
 

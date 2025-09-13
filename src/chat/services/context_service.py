@@ -184,7 +184,7 @@ class ContextService:
                         })
                         model_messages_buffer = []
 
-                    formatted_message = f'{reply_info}{msg.author.display_name}: {clean_content}'
+                    formatted_message = f'[user]: {reply_info}{msg.author.display_name}: {clean_content}'
                     user_messages_buffer.append(formatted_message)
 
             # 循环结束后，如果缓冲区还有用户消息，全部作为最后一个'user'回合提交

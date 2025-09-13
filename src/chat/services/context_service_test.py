@@ -82,7 +82,7 @@ class ContextServiceTest:
             
             if latest_user_message_index != -1:
                 latest_user_message = history_messages.pop(latest_user_message_index)
-                latest_user_message_content = self.clean_message_content(latest_user_message.content, latest_user_message.guild)
+                latest_user_message_content = f'[{latest_user_message.author.display_name}]: {self.clean_message_content(latest_user_message.content, latest_user_message.guild)}'
 
             # 处理剩余的历史消息
             for msg in history_messages:
@@ -103,14 +103,14 @@ class ContextServiceTest:
                     except (discord.NotFound, discord.Forbidden):
                         pass
                 
-                history_parts.append(f'{reply_info}{msg.author.display_name}: {clean_content}')
+                history_parts.append(f'[{msg.author.display_name}]: {reply_info}{clean_content}')
 
             # 构建最终的上下文列表
             final_context = []
             
             # 1. 将所有历史记录打包成一个 user 消息作为背景
             if history_parts:
-                background_prompt = "以下是历史对话和相关背景信息，请你只针对用户的最新消息进行回复：\n\n" + "\n\n".join(history_parts)
+                background_prompt = "以下是历史对话，请你只针对用户的最新消息进行回复：\n\n" + "\n\n".join(history_parts)
                 final_context.append({
                     "role": "user",
                     "parts": [background_prompt]
@@ -133,7 +133,7 @@ class ContextServiceTest:
                         user_profile_prompt = "\n\n这是与你对话的用户的已知信息：\n" + "\n".join(profile_details)
             
             log.debug(f"--- 个人档案注入诊断 (Test Service): 最终生成的档案提示长度: {len(user_profile_prompt)} ---")
-            model_reply = f"好的,我已了解以上背景信息,会针对用户的最新消息进行回复。{affection_level_prompt}{user_profile_prompt}"
+            model_reply = f"好的,我已了解以上频道的历史消息。{affection_level_prompt}{user_profile_prompt}"
             final_context.append({
                 "role": "model",
                 "parts": [model_reply]

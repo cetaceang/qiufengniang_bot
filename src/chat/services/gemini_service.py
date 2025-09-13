@@ -300,6 +300,7 @@ class GeminiService:
             log.error(f"生成AI回复时出现意外错误: {e}", exc_info=True)
             error_msg = str(e).lower()
             if "429" in error_msg or "quota" in error_msg or "limit" in error_msg:
+                log.info(f"用户 {user_id} 触发了 429/配额限制错误: {e}")
                 return "类脑娘今天累啦,明天再来找她玩吧～"
             elif "network" in error_msg or "timeout" in error_msg or "connect" in error_msg:
                 return "类脑娘的...网络...似乎有些不稳定，请稍后...再试～"
