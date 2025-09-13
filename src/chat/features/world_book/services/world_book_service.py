@@ -138,6 +138,7 @@ class WorldBookService:
             user_name=user_name, # 新增：将名字传递给总结服务
             conversation_history=history_for_rag
         )
+        log.debug(f"RAG 总结查询: {summarized_query}")
 
         if not summarized_query:
             log.warning(f"RAG 查询总结失败 (user_id: {user_id}, guild_id: {guild_id})")
@@ -149,6 +150,8 @@ class WorldBookService:
             text=summarized_query,
             task_type="RETRIEVAL_QUERY"
         )
+        log.debug(f"RAG 查询嵌入生成状态: {'成功' if query_embedding else '失败'}")
+
 
         if not query_embedding:
             log.error("无法为 RAG 查询生成嵌入。")
@@ -164,6 +167,8 @@ class WorldBookService:
             
             if search_results:
                 log.debug(f"RAG 搜索简报 (ID 和 距离): {[f'{r['id']}({r['distance']:.4f})' for r in search_results]}")
+            else:
+                log.debug("RAG 搜索未返回任何结果。")
 
             return search_results
         except Exception as e:
@@ -184,12 +189,14 @@ class WorldBookService:
         Returns:
             bool: 添加成功返回 True，否则返回 False
         """
-        if not self.db_conn:
+        log.info(f"尝试添加通用知识条目: title='{title}', name='{name}', category='{category_name}'")
+        conn = self._get_db_connection()
+        if not conn:
             log.error("数据库连接不可用，无法添加知识条目。")
             return False
             
         try:
-            cursor = self.db_conn.cursor()
+            cursor = conn.cursor()
             
             # 1. 检查或创建类别
             cursor.execute("SELECT id FROM categories WHERE name = ?", (category_name,))
@@ -197,6 +204,7 @@ class WorldBookService:
             
             if category_row:
                 category_id = category_row[0]
+                log.debug(f"类别 '{category_name}' 已存在，ID: {category_id}")
             else:
                 # 如果类别不存在，则创建新类别
                 cursor.execute("INSERT INTO categories (name) VALUES (?)", (category_name,))
@@ -208,6 +216,7 @@ class WorldBookService:
             # 这里我们简单地将文本内容作为 "description" 字段
             content_dict = {"description": content_text}
             content_json = json.dumps(content_dict, ensure_ascii=False)
+            log.debug(f"知识条目内容 JSON: {content_json}")
             
             # 3. 生成唯一的条目 ID
             # 使用标题和时间戳生成一个唯一ID
@@ -216,27 +225,31 @@ class WorldBookService:
             # 清理标题，只保留字母、数字、中文和下划线，用作ID的一部分
             clean_title = re.sub(r'[^\w\u4e00-\u9fff]', '_', title)[:50]  # 限制长度
             entry_id = f"{clean_title}_{int(time.time())}"
+            log.debug(f"生成的知识条目 ID: {entry_id}")
             
             # 4. 插入新条目
             cursor.execute("""
-                INSERT INTO general_knowledge (id, title, name, content_json, category_id)
-                VALUES (?, ?, ?, ?, ?)
-            """, (entry_id, title, name, content_json, category_id))
+                INSERT INTO general_knowledge (id, title, name, content_json, category_id, contributor_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            """, (entry_id, title, name, content_json, category_id, contributor_id))
             
-            self.db_conn.commit()
+            conn.commit()
             log.info(f"成功添加知识条目: {entry_id} ({title}) 到类别 {category_name}")
             return True
             
         except sqlite3.Error as e:
             log.error(f"添加知识条目时发生数据库错误: {e}", exc_info=True)
-            if self.db_conn:
-                self.db_conn.rollback()
+            if conn:
+                conn.rollback()
             return False
         except Exception as e:
             log.error(f"添加知识条目时发生未知错误: {e}", exc_info=True)
-            if self.db_conn:
-                self.db_conn.rollback()
+            if conn:
+                conn.rollback()
             return False
+        finally:
+            if conn:
+                conn.close()
 
 # 使用已导入的全局服务实例来创建 WorldBookService 的单例
 world_book_service = WorldBookService(gemini_service, vector_db_service)

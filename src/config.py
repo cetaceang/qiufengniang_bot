@@ -41,7 +41,7 @@ BRAIN_GIRL_APP_ID = int(os.getenv("BRAIN_GIRL_APP_ID")) if os.getenv("BRAIN_GIRL
 VIEW_TIMEOUT = 300  # 交互视图的超时时间（秒），例如按钮、下拉菜单
 
 # --- 日志相关 ---
-LOG_LEVEL = "INFO"
+LOG_LEVEL = "DEBUG"
 LOG_FORMAT = "%(asctime)s - %(message)s"
 LOG_FILE_PATH = os.path.join(DATA_DIR, "bot_debug.log") # DEBUG 日志文件路径
 

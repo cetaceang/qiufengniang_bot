@@ -127,13 +127,15 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         # 这里需要实现获取最后插入条目的逻辑
         # 由于WorldBookService的add_general_knowledge方法不返回ID，我们需要查询数据库
         try:
-            # 使用world_book_service的数据库连接来查询
-            if hasattr(world_book_service, 'db_conn') and world_book_service.db_conn:
-                cursor = world_book_service.db_conn.cursor()
+            # 使用world_book_service的_get_db_connection方法来获取新的数据库连接
+            conn = world_book_service._get_db_connection()
+            if conn:
+                cursor = conn.cursor()
                 cursor.execute(
                     "SELECT id FROM general_knowledge ORDER BY ROWID DESC LIMIT 1"
                 )
                 result = cursor.fetchone()
+                conn.close()
                 return result['id'] if result else None
         except Exception as e:
             log.error(f"获取最后插入的条目ID时出错: {e}", exc_info=True)

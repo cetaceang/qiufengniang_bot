@@ -49,6 +49,8 @@ def initialize_database():
         name TEXT,
         content_json TEXT,
         category_id INTEGER,
+        contributor_id INTEGER,  -- 添加 contributor_id 列
+        created_at TEXT,         -- 添加 created_at 列
         FOREIGN KEY (category_id) REFERENCES categories(id)
     )
     ''')
