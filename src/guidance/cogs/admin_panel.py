@@ -11,23 +11,19 @@ from src import config
 
 log = logging.getLogger(__name__)
 
-def is_authorized():
-    """检查用户是否有权使用管理命令的装饰器"""
-    async def predicate(interaction: discord.Interaction) -> bool:
-        # 检查是否为开发者
-        if interaction.user.id in config.DEVELOPER_USER_IDS:
+def is_authorized(interaction: discord.Interaction) -> bool:
+    """检查用户是否有权使用管理命令"""
+    # 检查是否为开发者
+    if interaction.user.id in config.DEVELOPER_USER_IDS:
+        return True
+    
+    # 检查是否拥有管理员角色
+    if isinstance(interaction.user, discord.Member):
+        user_role_ids = {role.id for role in interaction.user.roles}
+        if not user_role_ids.isdisjoint(config.ADMIN_ROLE_IDS):
             return True
-        
-        # 检查是否拥有管理员角色
-        if isinstance(interaction.user, discord.Member):
-            user_role_ids = {role.id for role in interaction.user.roles}
-            if not user_role_ids.isdisjoint(config.ADMIN_ROLE_IDS):
-                return True
-        
-        log.warning(f"用户 {interaction.user} (ID: {interaction.user.id}) 尝试执行管理命令失败（权限不足）。")
-        await interaction.response.send_message("❌ 你没有权限使用此命令。", ephemeral=True)
-        return False
-    return app_commands.check(predicate)
+            
+    return False
 
 class AdminPanel(commands.Cog):
     """
@@ -37,8 +33,6 @@ class AdminPanel(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="新人引导管理面板", description="打开集成的多功能新人引导管理面板。")
-    @app_commands.default_permissions(manage_guild=True)
-    @is_authorized()
     async def open_admin_panel(self, interaction: discord.Interaction):
         """
         显示主管理面板。
@@ -48,6 +42,10 @@ class AdminPanel(commands.Cog):
 
             if not interaction.guild:
                 await interaction.followup.send("此命令只能在服务器中使用。", ephemeral=True)
+                return
+
+            if not is_authorized(interaction):
+                await interaction.followup.send("❌ 你没有权限使用此命令。", ephemeral=True)
                 return
             
             view = MainPanelView(interaction)

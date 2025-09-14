@@ -1,15 +1,22 @@
 import discord
 import logging
-import asyncio
+import json
+import sqlite3
+import os
 from typing import Dict, Any
+from datetime import datetime, timedelta
 
-# 导入 WorldBookService
-from src.chat.features.world_book.services.world_book_service import world_book_service
-from src.chat.features.world_book.services.incremental_rag_service import incremental_rag_service
+from src import config
+from src.chat.config import chat_config
 
 log = logging.getLogger(__name__)
 
 # 定义可用的类别列表
+
+# 获取审核配置
+REVIEW_SETTINGS = chat_config.WORLD_BOOK_CONFIG['review_settings']
+VOTE_EMOJI = REVIEW_SETTINGS['vote_emoji']
+REJECT_EMOJI = REVIEW_SETTINGS['reject_emoji']
 AVAILABLE_CATEGORIES = [
     "社区信息",
     "社区文化",
@@ -23,7 +30,6 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
     def __init__(self):
         super().__init__()
         
-        # 类别输入框
         self.category_input = discord.ui.TextInput(
             label="类别",
             placeholder=f"请输入类别，例如：{', '.join(AVAILABLE_CATEGORIES)}",
@@ -32,7 +38,6 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         )
         self.add_item(self.category_input)
         
-        # 标题输入框
         self.title_input = discord.ui.TextInput(
             label="标题",
             placeholder="请输入知识条目的标题",
@@ -41,7 +46,6 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         )
         self.add_item(self.title_input)
         
-        # 内容输入框
         self.content_input = discord.ui.TextInput(
             label="内容",
             placeholder="请输入详细内容",
@@ -50,105 +54,143 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
             required=True
         )
         self.add_item(self.content_input)
-        
+
+    def _get_world_book_connection(self):
+        """获取世界书数据库的连接"""
+        try:
+            db_path = os.path.join(config.DATA_DIR, 'world_book.sqlite3')
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except sqlite3.Error as e:
+            log.error(f"连接到世界书数据库失败: {e}", exc_info=True)
+            return None
+
+    async def create_pending_entry(self, interaction: discord.Interaction, knowledge_data: Dict[str, Any]) -> int | None:
+        """将提交的数据作为待审核条目存入数据库"""
+        conn = self._get_world_book_connection()
+        if not conn:
+            return None
+            
+        try:
+            cursor = conn.cursor()
+            
+            duration_minutes = chat_config.WORLD_BOOK_CONFIG['review_settings']['review_duration_minutes']
+            expires_at = datetime.utcnow() + timedelta(minutes=duration_minutes)
+            
+            data_json = json.dumps(knowledge_data, ensure_ascii=False)
+            
+            cursor.execute("""
+                INSERT INTO pending_entries
+                (entry_type, data_json, channel_id, guild_id, proposer_id, expires_at, message_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                'general_knowledge',
+                data_json,
+                interaction.channel_id,
+                interaction.guild_id,
+                interaction.user.id,
+                expires_at.isoformat(),
+                -1 # 临时 message_id
+            ))
+            
+            pending_id = cursor.lastrowid
+            conn.commit()
+            log.info(f"已创建待审核条目 #{pending_id} (类型: general_knowledge)，提交者: {interaction.user.id}")
+            return pending_id
+            
+        except sqlite3.Error as e:
+            log.error(f"创建待审核条目时发生数据库错误: {e}", exc_info=True)
+            conn.rollback()
+            return None
+        finally:
+            conn.close()
+
+    async def update_message_id_for_pending_entry(self, pending_id: int, message_id: int):
+        """更新待审核条目的 message_id"""
+        conn = self._get_world_book_connection()
+        if not conn:
+            return
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE pending_entries SET message_id = ? WHERE id = ?", (message_id, pending_id))
+            conn.commit()
+            log.info(f"已为待审核条目 #{pending_id} 更新 message_id 为 {message_id}")
+        except sqlite3.Error as e:
+            log.error(f"更新待审核条目的 message_id 时出错: {e}", exc_info=True)
+            conn.rollback()
+        finally:
+            conn.close()
+
     async def on_submit(self, interaction: discord.Interaction):
         """当用户提交模态窗口时调用"""
-        # 获取用户输入的值
         category = self.category_input.value.strip()
         title = self.title_input.value.strip()
         content = self.content_input.value.strip()
         
-        # 基本验证
-        if not category:
-            await interaction.response.send_message("类别不能为空。", ephemeral=True)
-            return
-        
-        # 验证类别是否在可用列表中
         if category not in AVAILABLE_CATEGORIES:
             await interaction.response.send_message(f"无效的类别。请从以下选项中选择: {', '.join(AVAILABLE_CATEGORIES)}", ephemeral=True)
             return
             
-        if not title:
-            await interaction.response.send_message("标题不能为空。", ephemeral=True)
+        if not all([category, title, content]):
+            await interaction.response.send_message("类别、标题和内容均不能为空。", ephemeral=True)
             return
             
-        if not content:
-            await interaction.response.send_message("内容不能为空。", ephemeral=True)
-            return
-            
-        # 调用 WorldBookService 的 add_general_knowledge 方法保存数据
-        success = world_book_service.add_general_knowledge(
-            title=title,
-            name=title,  # 使用标题作为名称
-            content_text=content,
-            category_name=category,
-            contributor_id=interaction.user.id
-        )
+        knowledge_data = {
+            'category_name': category,
+            'title': title,
+            'name': title, # 使用标题作为名称
+            'content_text': content,
+            'contributor_id': interaction.user.id,
+            'contributor_name': interaction.user.display_name
+        }
         
-        # 根据保存结果发送相应的消息
-        if success:
-            # 获取最后插入的条目ID
-            entry_id = await self._get_last_inserted_entry_id()
-            
-            if entry_id:
-                # 异步调用增量RAG处理（不阻塞用户响应）
-                asyncio.create_task(self._process_entry_for_rag(entry_id))
-            
-            await interaction.response.send_message(
-                f"感谢您的贡献！您的知识条目已成功提交。\n\n类别: {category}\n标题: {title}\n内容: {content[:100]}{'...' if len(content) > 100 else ''}",
-                ephemeral=True
-            )
-            log.info(f"用户 {interaction.user.id} 成功提交了知识条目: category={category}, title={title}")
+        pending_id = await self.create_pending_entry(interaction, knowledge_data)
+        
+        if not pending_id:
+            await interaction.response.send_message("提交审核时发生错误，请稍后再试。", ephemeral=True)
+            return
 
-            # 构建并发送公共 embed 面板
-            embed = discord.Embed(
-                title="✨ 新的世界之书贡献！",
-                description=f"**{interaction.user.display_name}** 提交了一个新的知识条目！",
-                color=discord.Color.blue()
-            )
-            embed.add_field(name="类别", value=category, inline=True)
-            embed.add_field(name="标题", value=title, inline=False)
-            embed.add_field(name="内容预览", value=content[:500] + ('...' if len(content) > 500 else ''), inline=False) # 限制内容长度
-            embed.set_footer(text=f"贡献者ID: {interaction.user.id}")
-            embed.timestamp = interaction.created_at
+        await interaction.response.send_message(
+            f"✅ 您的知识贡献 **{title}** 已成功提交审核！\n请关注频道内的公开投票。",
+            ephemeral=True
+        )
 
-            # 在当前频道发送 embed
-            await interaction.channel.send(embed=embed)
+        review_settings = chat_config.WORLD_BOOK_CONFIG['review_settings']
+        duration = review_settings['review_duration_minutes']
+        approval_threshold = review_settings['approval_threshold']
+        instant_approval_threshold = review_settings['instant_approval_threshold']
+        rejection_threshold = review_settings['rejection_threshold']
 
-        else:
-            await interaction.response.send_message(
-                "很抱歉，提交知识条目时出现了问题。请稍后再试。",
-                ephemeral=True
-            )
-            log.error(f"用户 {interaction.user.id} 提交知识条目失败: category={category}, title={title}")
-    
-    async def _get_last_inserted_entry_id(self) -> str:
-        """获取最后插入的通用知识条目ID"""
-        # 这里需要实现获取最后插入条目的逻辑
-        # 由于WorldBookService的add_general_knowledge方法不返回ID，我们需要查询数据库
-        try:
-            # 使用world_book_service的_get_db_connection方法来获取新的数据库连接
-            conn = world_book_service._get_db_connection()
-            if conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT id FROM general_knowledge ORDER BY ROWID DESC LIMIT 1"
-                )
-                result = cursor.fetchone()
-                conn.close()
-                return result['id'] if result else None
-        except Exception as e:
-            log.error(f"获取最后插入的条目ID时出错: {e}", exc_info=True)
-        return None
-    
-    async def _process_entry_for_rag(self, entry_id: str):
-        """异步处理通用知识条目的RAG"""
-        try:
-            log.info(f"开始异步处理通用知识条目的RAG: {entry_id}")
-            success = await incremental_rag_service.process_general_knowledge(entry_id)
-            if success:
-                log.info(f"通用知识条目 {entry_id} 的RAG处理完成")
-            else:
-                log.warning(f"通用知识条目 {entry_id} 的RAG处理失败")
-        except Exception as e:
-            log.error(f"处理通用知识条目RAG时发生错误: {e}", exc_info=True)
+        embed = discord.Embed(
+            title="新的世界之书贡献",
+            description=(
+                f"**{interaction.user.display_name}** 提交了一份新的知识条目，需要社区进行审核。\n\n"
+                f"*审核将在{duration}分钟后自动结束。*"
+            ),
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="类别", value=category, inline=True)
+        embed.add_field(name="标题", value=title, inline=False)
+        embed.add_field(name="内容预览", value=content[:500] + ('...' if len(content) > 500 else ''), inline=False)
+        
+        # 在 footer 中添加投票规则，使其不那么显眼
+        duration = REVIEW_SETTINGS['review_duration_minutes']
+        approval_threshold = REVIEW_SETTINGS['approval_threshold']
+        instant_approval_threshold = REVIEW_SETTINGS['instant_approval_threshold']
+        rejection_threshold = REVIEW_SETTINGS['rejection_threshold']
+        
+        rules_text = (
+            f"投票规则: {VOTE_EMOJI} 达到{approval_threshold}个通过 | "
+            f"{VOTE_EMOJI} {duration}分钟内达到{instant_approval_threshold}个立即通过 | "
+            f"{REJECT_EMOJI} 达到{rejection_threshold}个否决"
+        )
+        footer_text = f"提交者: {interaction.user.display_name} (ID: {interaction.user.id}) | 审核ID: {pending_id} | {rules_text}"
+        embed.set_footer(text=footer_text)
+        embed.timestamp = interaction.created_at
+        
+        review_message = await interaction.followup.send(embed=embed, wait=True)
+        
+        await self.update_message_id_for_pending_entry(pending_id, review_message.id)
+        

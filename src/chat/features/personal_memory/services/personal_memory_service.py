@@ -9,6 +9,7 @@ from src.chat.utils.database import chat_db_manager
 from src.chat.config.chat_config import PERSONAL_MEMORY_CONFIG, PROMPT_CONFIG, SUMMARY_MODEL
 from src.chat.features.personal_memory.ui.profile_modal import ProfileEditView
 from src.chat.services.gemini_service import gemini_service
+from src.chat.features.world_book.services.incremental_rag_service import incremental_rag_service
 # 新增导入，用于获取频道历史
 from src.chat.services.context_service import context_service
 from src import config
@@ -89,7 +90,7 @@ class PersonalMemoryService:
             log.error(f"向用户 {user.id} 发送档案提示时发生错误: {e}", exc_info=True)
 
     async def save_user_profile(self, user_id: int, profile_data: Dict[str, str]):
-        """将用户提交的个人档案保存到世界书数据库的community_members表中。"""
+        """将用户提交的个人档案保存到世界书数据库的community_members表中，并触发RAG同步。"""
         # 构建社区成员数据
         member_data = {
             "name": profile_data.get('name', '未提供'),
@@ -98,19 +99,18 @@ class PersonalMemoryService:
             "preferences": profile_data.get('preferences', '未提供')
         }
         
-        # 将数据转换为JSON格式
         content_json = json.dumps(member_data, ensure_ascii=False)
         
-        # 保存到世界书数据库的community_members表
         conn = self._get_world_book_connection()
         if not conn:
             log.error("无法连接到世界书数据库，无法保存用户档案")
             return
-            
+
+        rag_update_id = None
+        is_update = False
+
         try:
             cursor = conn.cursor()
-            
-            # 检查用户是否已存在
             cursor.execute(
                 "SELECT id FROM community_members WHERE discord_number_id = ?",
                 (str(user_id),)
@@ -118,28 +118,44 @@ class PersonalMemoryService:
             existing_member = cursor.fetchone()
             
             if existing_member:
-                # 更新现有成员
+                is_update = True
+                rag_update_id = existing_member['id']
                 cursor.execute(
                     "UPDATE community_members SET title = ?, content_json = ? WHERE discord_number_id = ?",
                     (f"用户档案 - {profile_data.get('name', '匿名')}", content_json, str(user_id))
                 )
                 log.info(f"已更新用户 {user_id} 在世界书数据库中的社区成员档案。")
             else:
-                # 插入新成员
-                member_id = f"user_{user_id}"
+                is_update = False
+                rag_update_id = f"user_{user_id}"
                 cursor.execute(
                     "INSERT INTO community_members (id, title, discord_number_id, content_json) VALUES (?, ?, ?, ?)",
-                    (member_id, f"用户档案 - {profile_data.get('name', '匿名')}", str(user_id), content_json)
+                    (rag_update_id, f"用户档案 - {profile_data.get('name', '匿名')}", str(user_id), content_json)
                 )
                 log.info(f"已为用户 {user_id} 在世界书数据库中创建社区成员档案。")
             
             conn.commit()
-            
         except sqlite3.Error as e:
             log.error(f"保存用户档案到世界书数据库时出错: {e}", exc_info=True)
             conn.rollback()
+            rag_update_id = None # 如果数据库操作失败，则不尝试RAG同步
         finally:
             conn.close()
+
+        # --- RAG 同步 (在数据库连接关闭后执行) ---
+        if rag_update_id:
+            try:
+                if is_update:
+                    log.info(f"开始为用户 {user_id} 的个人档案触发RAG更新 (ID: {rag_update_id})。")
+                    await incremental_rag_service.delete_entry(rag_update_id)
+                    await incremental_rag_service.process_community_member(rag_update_id)
+                    log.info(f"成功为用户 {user_id} 的个人档案触发RAG更新。")
+                else:
+                    log.info(f"开始为用户 {user_id} 的新个人档案触发RAG创建 (ID: {rag_update_id})。")
+                    await incremental_rag_service.process_community_member(rag_update_id)
+                    log.info(f"成功为用户 {user_id} 的新个人档案触发RAG创建。")
+            except Exception as e:
+                log.error(f"在保存用户档案后进行RAG同步时出错 (ID: {rag_update_id}): {e}", exc_info=True)
 
 
     async def increment_and_check_message_count(self, user_id: int, guild_id: int) -> int:

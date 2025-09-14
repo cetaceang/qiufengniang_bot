@@ -18,9 +18,9 @@ def is_admin_or_dev():
             log.warning("ADMIN_ROLE_IDS 和 DEVELOPER_USER_IDS 未在 .env 文件中配置。")
             return False
             
-        user_roles = {role.id for role in interaction.user.roles}
-        is_admin = not user_roles.isdisjoint(config.ADMIN_ROLE_IDS)
-        is_dev = interaction.user.id in config.DEVELOPER_USER_IDS
+        user_roles = [str(role.id) for role in interaction.user.roles]
+        is_admin = any(admin_id in user_roles for admin_id in config.ADMIN_ROLE_IDS)
+        is_dev = str(interaction.user.id) in config.DEVELOPER_USER_IDS
         
         result = is_admin or is_dev
         if not result:
@@ -36,7 +36,6 @@ class AdminPanelCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="数据库管理", description="以交互方式浏览和管理数据库内容")
-    @app_commands.default_permissions(manage_guild=True)
     @is_admin_or_dev()
     async def db_view(self, interaction: discord.Interaction):
         """启动数据库浏览器"""

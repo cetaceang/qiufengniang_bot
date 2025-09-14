@@ -18,20 +18,20 @@ class VectorDBService:
         try:
             # 初始化持久化客户端
             self.client = chromadb.PersistentClient(path=config.VECTOR_DB_PATH)
+            self.collection_name = config.VECTOR_DB_COLLECTION_NAME
             
-            # 获取或创建集合
-            self.collection: Collection = self.client.get_or_create_collection(
-                name=config.VECTOR_DB_COLLECTION_NAME
-            )
-            log.info(f"成功连接到 ChromaDB 并加载集合: '{config.VECTOR_DB_COLLECTION_NAME}'")
+            # 启动时尝试获取或创建一次，以确保数据库连接正常
+            self.client.get_or_create_collection(name=self.collection_name)
+            
+            log.info(f"成功连接到 ChromaDB，将操作集合: '{self.collection_name}'")
         except Exception as e:
             log.error(f"初始化 ChromaDB 服务失败: {e}", exc_info=True)
             self.client = None
-            self.collection = None
+            self.collection_name = None
 
     def is_available(self) -> bool:
         """检查服务是否可用"""
-        return self.client is not None and self.collection is not None
+        return self.client is not None and self.collection_name is not None
 
     def recreate_collection(self):
         """
@@ -51,14 +51,13 @@ class VectorDBService:
 
         try:
             log.info(f"正在创建新的集合: '{config.VECTOR_DB_COLLECTION_NAME}'...")
-            self.collection = self.client.create_collection(
-                name=config.VECTOR_DB_COLLECTION_NAME
+            # 创建后不需要立即赋值给 self.collection
+            self.client.create_collection(
+                name=self.collection_name
             )
             log.info("新集合已成功创建。")
         except Exception as e:
             log.error(f"创建新集合时出错: {e}", exc_info=True)
-            # 如果创建失败，将 collection 设为 None 以反映状态
-            self.collection = None
  
     def add_documents(self, ids: List[str], documents: List[str], embeddings: List[List[float]], metadatas: List[Dict[str, Any]]):
         """
@@ -75,16 +74,54 @@ class VectorDBService:
             return
 
         try:
+            # 在操作前获取最新的集合对象
+            collection = self.client.get_or_create_collection(name=self.collection_name)
             # 使用 upsert 来添加新文档或更新现有文档，现在包含元数据
-            self.collection.upsert(
+            collection.upsert(
                 ids=ids,
                 embeddings=embeddings,
                 documents=documents,
                 metadatas=metadatas
             )
-            log.info(f"成功向集合 '{self.collection.name}' 中添加/更新了 {len(ids)} 个文档。")
+            log.info(f"成功向集合 '{collection.name}' 中添加/更新了 {len(ids)} 个文档。")
         except Exception as e:
             log.error(f"向 ChromaDB 添加文档时出错: {e}", exc_info=True)
+
+    def delete_documents(self, ids: List[str]):
+        """
+        从集合中删除指定的文档。
+
+        Args:
+            ids: 要删除的文档的唯一ID列表。
+        """
+        if not self.is_available():
+            log.error("VectorDB 服务不可用，无法删除文档。")
+            return
+
+        if not ids:
+            log.warning("尝试删除文档，但未提供任何 ID。")
+            return
+
+        try:
+            # 在操作前获取最新的集合对象
+            collection = self.client.get_or_create_collection(name=self.collection_name)
+            collection.delete(ids=ids)
+            log.info(f"成功从集合 '{collection.name}' 中删除了 {len(ids)} 个文档。")
+        except Exception as e:
+            log.error(f"从 ChromaDB 删除文档时出错: {e}", exc_info=True)
+
+    def get_all_ids(self) -> List[str]:
+        """获取集合中所有文档的ID。"""
+        if not self.is_available():
+            log.error("VectorDB 服务不可用，无法获取ID。")
+            return []
+        try:
+            collection = self.client.get_or_create_collection(name=self.collection_name)
+            results = collection.get(include=[])
+            return results.get('ids', [])
+        except Exception as e:
+            log.error(f"从 ChromaDB 获取所有ID时出错: {e}", exc_info=True)
+            return []
 
     def search(self, query_embedding: List[float], n_results: int = 3, max_distance: float = 0.75) -> List[Dict[str, Any]]:
         """
@@ -103,7 +140,9 @@ class VectorDBService:
             return []
 
         try:
-            results = self.collection.query(
+            # 在操作前获取最新的集合对象
+            collection = self.client.get_or_create_collection(name=self.collection_name)
+            results = collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
                 include=["documents", "distances", "metadatas"] # 明确请求返回元数据

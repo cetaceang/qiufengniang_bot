@@ -11,8 +11,8 @@ SHOP_ITEMS = [
     # name, description, price, category, target, effect_id
     ("咖啡", "喝下后你感觉精力变强了一点...不过好像只有24h", 50, "食品-给自己", "self", "coffee_chat_cooldown"),
     ("个人记忆功能", "解锁与类脑娘的专属长期记忆，让她真正地记住你。", 100, "物品-给自己", "self", PERSONAL_MEMORY_ITEM_EFFECT_ID),
-    ("知识纸条", "写下你对社区的了解，帮助类脑娘更好地认识世界。", 0, "物品-贡献", "self", WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID),
-    ("社区成员档案上传", "上传社区成员的档案信息，帮助类脑娘更好地了解社区。", 100, "物品-贡献", "self", COMMUNITY_MEMBER_UPLOAD_EFFECT_ID),
+    ("知识纸条", "写下你对社区的了解（仅限无关社区成员的信息），帮助类脑娘更好地认识世界。", 0, "物品-贡献", "self", WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID),
+    ("社区成员档案上传", "上传社区成员的档案信息，上传的信息将被正确识别为社区成员。", 100, "物品-贡献", "self", COMMUNITY_MEMBER_UPLOAD_EFFECT_ID),
     ("草莓小蛋糕", "精致的奶油草莓蛋糕", 15, "食品-给类脑娘", "ai", None),
     ("巧克力曲奇", "香浓可口的巧克力曲奇饼干", 12, "食品-给类脑娘", "ai", None),
     ("抹茶马卡龙", "精致的法式抹茶马卡龙", 18, "食品-给类脑娘", "ai", None),
