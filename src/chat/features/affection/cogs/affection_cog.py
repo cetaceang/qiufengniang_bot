@@ -60,7 +60,7 @@ class AffectionCog(commands.Cog):
             status = await self.affection_service.get_affection_status(user.id, guild.id)
             
             embed = discord.Embed(
-                title=f"{user.display_name} 与AI的好感度",
+                title=f"{user.display_name} 与类脑娘的好感度",
                 color=discord.Color.pink()
             )
             embed.set_thumbnail(url=user.display_avatar.url)
