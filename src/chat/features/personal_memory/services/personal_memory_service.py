@@ -3,7 +3,10 @@ import logging
 import json
 import sqlite3
 import os
-from typing import Dict
+from typing import Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..cogs.personal_memory_cog import PersonalMemoryCog
 
 from src.chat.utils.database import chat_db_manager
 from src.chat.config.chat_config import PERSONAL_MEMORY_CONFIG, PROMPT_CONFIG, SUMMARY_MODEL
@@ -19,6 +22,7 @@ class PersonalMemoryService:
     def __init__(self):
         self.db_manager = chat_db_manager
         self.world_book_db_path = os.path.join(config.DATA_DIR, 'world_book.sqlite3')
+        self.cog: PersonalMemoryCog = None # 用于类型提示和回调
 
     def _get_world_book_connection(self):
         """获取世界书数据库的连接"""
@@ -53,6 +57,11 @@ class PersonalMemoryService:
             message = await channel.send(embed=embed)
             await message.add_reaction(approval_emoji)
             log.info(f"已在频道 {channel.id} 为用户 {user.id} 发起个人记忆功能激活投票。")
+
+            # --- 优化：将消息ID注册到Cog的缓存中 ---
+            if self.cog:
+                self.cog.approval_message_ids.add(message.id)
+                log.debug(f"已将投票消息 {message.id} 添加到追踪缓存。")
         except discord.Forbidden:
             log.error(f"机器人没有权限在频道 {channel.name} (ID: {channel.id}) 中发送消息或添加反应。")
         except Exception as e:

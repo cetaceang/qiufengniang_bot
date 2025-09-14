@@ -14,6 +14,9 @@ class PersonalMemoryCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.service = personal_memory_service
+        self.approval_message_ids = set()
+        # 将 cog 实例传递给 service，以便 service 可以回调
+        self.service.cog = self
 
     @commands.Cog.listener('on_interaction')
     async def on_modal_submit(self, interaction: discord.Interaction):
@@ -62,6 +65,11 @@ class PersonalMemoryCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        # --- 优化：前置检查 ---
+        # 如果消息ID不在我们追踪的投票消息列表中，则直接忽略事件，避免API调用
+        if payload.message_id not in self.approval_message_ids:
+            return
+
         if payload.user_id == self.bot.user.id:
             return
 
@@ -132,6 +140,9 @@ class PersonalMemoryCog(commands.Cog):
         await message.edit(embed=new_embed, view=None) # 移除按钮
         await message.clear_reactions()
         log.info(f"用户 {target_user_id} 的个人记忆功能投票通过并已激活。")
+
+        # --- 优化：处理完毕后从缓存中移除 ---
+        self.approval_message_ids.discard(message.id)
 
 
 async def setup(bot: commands.Bot):
