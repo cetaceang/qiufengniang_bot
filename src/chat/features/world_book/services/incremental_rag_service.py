@@ -446,5 +446,53 @@ class IncrementalRAGService:
         log.debug(f"构建的通用知识 RAG 条目: {rag_entry['id']}")
         return rag_entry
 
+    async def delete_entry(self, entry_id: str) -> bool:
+        """
+        从向量数据库中删除与指定条目ID相关的所有文档块。
+
+        Args:
+            entry_id: 要删除的主条目ID (例如 community_members 的 id)。
+
+        Returns:
+            bool: 删除成功返回True，否则返回False。
+        """
+        if not self.is_ready():
+            log.warning(f"RAG服务尚未准备就绪，无法删除条目 {entry_id}")
+            return False
+
+        try:
+            # ChromaDB 的 get 方法可以按 ID 前缀过滤
+            # 我们需要找到所有以 "entry_id:" 开头的文档
+            # 注意：ChromaDB 的 get() 方法目前不直接支持前缀搜索。
+            # 我们需要获取所有文档然后自己过滤，或者使用 where 查询。
+            # 一个更高效的方法是，如果知道分块数量，就直接生成ID。
+            # 但我们不知道，所以采用 where 查询。
+            
+            # 为了避免潜在的SQL注入风险（尽管这里不是SQL），我们使用 where 子句
+            # ChromaDB 的 ID 是字符串，所以 entry_id 必须是字符串
+            str_entry_id = str(entry_id)
+            
+            # 使用 get 方法获取与主 ID 相关的所有条目
+            # 我们只需要 id 字段来执行删除
+            # 备用策略：获取集合中的所有ID，然后在本地进行过滤。
+            # 这在集合很大时效率很低。
+            all_ids = self.vector_db_service.get_all_ids()
+            ids_to_delete = [doc_id for doc_id in all_ids if doc_id.startswith(f"{str_entry_id}:")]
+
+            if not ids_to_delete:
+                log.warning(f"在向量数据库中没有找到与条目 {entry_id} 相关的文档块可供删除。")
+                return True # 认为操作成功，因为目标状态（不存在）已达成
+
+            log.debug(f"找到 {len(ids_to_delete)} 个与条目 {entry_id} 相关的文档块，准备删除: {ids_to_delete}")
+            
+            self.vector_db_service.delete_documents(ids=ids_to_delete)
+            
+            log.info(f"成功删除了与条目 {entry_id} 相关的 {len(ids_to_delete)} 个文档块。")
+            return True
+
+        except Exception as e:
+            log.error(f"删除条目 {entry_id} 的向量时发生错误: {e}", exc_info=True)
+            return False
+
 # 全局实例
 incremental_rag_service = IncrementalRAGService()

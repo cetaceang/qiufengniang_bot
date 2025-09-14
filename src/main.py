@@ -85,6 +85,7 @@ class GuidanceBot(commands.Bot):
         intents = discord.Intents.default()
         intents.members = True  # 需要监听成员加入、角色变化
         intents.message_content = True # 根据 discord.py v2.0+ 的要求
+        intents.reactions = True # 需要监听反应事件
 
         # 解析 GUILD_ID 环境变量，支持用逗号分隔的多个 ID
         debug_guilds = None
@@ -103,15 +104,7 @@ class GuidanceBot(commands.Bot):
 
         # 使用 debug_guilds 参数初始化机器人
         # 这会将所有斜杠命令自动注册为服务器命令，实现快速更新
-        # 使用 debug_guilds 参数初始化机器人
-        # 这会将所有斜杠命令自动注册为服务器命令，实现快速更新
-        # 通过设置 MemberCacheFlags.none() 来禁用成员缓存，以大幅减少内存占用
-        super().__init__(
-            command_prefix="!",
-            intents=intents,
-            debug_guilds=self.debug_guild_ids,
-            member_cache_flags=discord.MemberCacheFlags.none()
-        )
+        super().__init__(command_prefix="!", intents=intents, debug_guilds=self.debug_guild_ids)
 
     async def setup_hook(self):
         """
@@ -213,6 +206,12 @@ class GuidanceBot(commands.Bot):
             log.error(f"同步命令时出错: {e}", exc_info=True)
             
         log.info('--------------------')
+        # --- 内存诊断代码 ---
+        import objgraph
+        log.info("--- 开始内存诊断 ---")
+        log.info("内存中数量最多的前 20 个对象类型:")
+        objgraph.show_most_common_types(limit=20)
+        log.info("--- 内存诊断结束 ---")
 
 
 async def main():

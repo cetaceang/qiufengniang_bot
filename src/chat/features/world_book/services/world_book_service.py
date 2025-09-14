@@ -133,15 +133,31 @@ class WorldBookService:
                 history_for_rag.pop()
                 log.debug("已为RAG总结移除系统注入的上下文提示。")
 
+        # --- RAG 查询总结 ---
+        # 1. 准备对话历史，最多取最近3轮
+        history_for_summary = history_for_rag[-3:] if len(history_for_rag) > 3 else history_for_rag
+        log.info(f"准备为RAG总结查询。原始查询: '{latest_query}', 使用对话历史轮数: {len(history_for_summary)}")
+
+        # 2. 调用总结服务
         summarized_query = await self.gemini_service.summarize_for_rag(
             latest_query=latest_query,
-            user_name=user_name, # 新增：将名字传递给总结服务
-            conversation_history=history_for_rag
+            user_name=user_name,
+            conversation_history=history_for_summary
         )
-        log.debug(f"RAG 总结查询: {summarized_query}")
+        
+        # 3. 处理总结结果
+        if summarized_query:
+            log.info(f"RAG 总结查询成功: '{summarized_query}'")
+        else:
+            # 如果总结失败，回退到使用格式化后的原始查询
+            from src.chat.services.regex_service import regex_service
+            clean_query = regex_service.clean_user_input(latest_query)
+            summarized_query = f"[{user_name}]: {clean_query}"
+            log.warning(f"RAG 查询总结失败，将回退到使用格式化的原始查询: '{summarized_query}'")
 
-        if not summarized_query:
-            log.warning(f"RAG 查询总结失败 (user_id: {user_id}, guild_id: {guild_id})")
+        # 4. 确保查询字符串不为空
+        if not summarized_query.strip():
+            log.warning(f"最终查询为空，无法进行RAG搜索 (user_id: {user_id})")
             return []
 
 

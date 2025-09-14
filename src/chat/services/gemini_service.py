@@ -240,9 +240,13 @@ class GeminiService:
                 log.error(f"序列化上下文用于日志记录时失败: {log_e}")
 
             # 2. Prepare API call parameters
-            gen_config = types.GenerateContentConfig(**app_config.GEMINI_CHAT_CONFIG)
-            if 'flash' in self.model_name.lower():
-                gen_config.thinking_config = types.ThinkingConfig(thinking_budget=0)
+            chat_config = app_config.GEMINI_CHAT_CONFIG.copy()
+            thinking_budget = chat_config.pop("thinking_budget", None)
+
+            gen_config = types.GenerateContentConfig(**chat_config)
+            if thinking_budget is not None:
+                gen_config.thinking_config = types.ThinkingConfig(thinking_budget=thinking_budget)
+            
 
             processed_contents = self._prepare_api_contents(final_conversation)
             
@@ -265,6 +269,7 @@ class GeminiService:
                         )
                     )
                     
+
                     if response.parts:
                         raw_ai_response = response.text.strip()
                         
@@ -439,7 +444,7 @@ class GeminiService:
             一个精炼后的、适合向量检索的查询字符串。
         """
         if not latest_query:
-            log.warning("RAG summarization called with no latest_query.")
+            log.info("RAG summarization called with no latest_query.")
             return ""
 
         prompt = prompt_service.build_rag_summary_prompt(latest_query, user_name, conversation_history)
@@ -450,7 +455,7 @@ class GeminiService:
         )
 
         if not summarized_query:
-            log.warning("RAG查询总结失败，将直接使用用户的原始查询。")
+            log.info("RAG查询总结失败，将直接使用用户的原始查询。")
             return latest_query.strip()
 
         return summarized_query.strip().strip('"')

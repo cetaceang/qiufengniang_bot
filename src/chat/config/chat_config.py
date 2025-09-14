@@ -24,7 +24,8 @@ GEMINI_CHAT_CONFIG = {
     "temperature": 1.1,
     "top_p": 0.97,
     "top_k": 50,
-    "max_output_tokens": 300,
+    "max_output_tokens": 900,
+    "thinking_budget": 500,  # 思考预算
 }
 
 GEMINI_TEXT_GEN_CONFIG = {
@@ -95,5 +96,24 @@ VECTOR_DB_COLLECTION_NAME = "world_book"
 
 # --- 世界之书向量化任务配置 ---
 WORLD_BOOK_CONFIG = {
-    "VECTOR_INDEX_UPDATE_INTERVAL_HOURS": 6  # 向量索引更新间隔（小时）
+    "VECTOR_INDEX_UPDATE_INTERVAL_HOURS": 6,  # 向量索引更新间隔（小时）
+
+    # 审核系统设置
+    "review_settings": {
+        # 审核的持续时间（分钟）
+        "review_duration_minutes": 1,
+
+        # 审核时间结束后，通过所需的最低赞成票数
+        "approval_threshold": 1,
+
+        # 在审核期间，可立即通过的赞成票数
+        "instant_approval_threshold": 2,
+
+        # 在审核期间，可立即否决的反对票数
+        "rejection_threshold": 1,
+        
+        # 投票使用的表情符号
+        "vote_emoji": "✅",
+        "reject_emoji": "❌",
+    }
 }
