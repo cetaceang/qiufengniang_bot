@@ -35,7 +35,7 @@ class AdminPanelCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="数据库管理", description="以交互方式浏览和管理数据库内容")
+    @app_commands.command(name="数据库管理", description="以交互方式浏览和管理数据库内容", default_permissions=discord.Permissions(manage_guild=True))
     @is_admin_or_dev()
     async def db_view(self, interaction: discord.Interaction):
         """启动数据库浏览器"""
