@@ -2,19 +2,21 @@ import chromadb
 import os
 import argparse
 import sqlite3
-from src import config
+from src.chat.config import chat_config
+from src import config as app_config # 仍然需要它来获取 SQLite 路径
 
 # --- 配置 ---
-CHROMA_DB_DIR = os.path.join(config.DATA_DIR, "chroma_db")
-SQLITE_DB_PATH = os.path.join(config.DATA_DIR, 'world_book.sqlite3')
-COLLECTION_NAME = "world_book"
+# 使用与主程序完全相同的配置源
+CHROMA_DB_PATH = chat_config.VECTOR_DB_PATH
+COLLECTION_NAME = chat_config.VECTOR_DB_COLLECTION_NAME
+SQLITE_DB_PATH = os.path.join(app_config.DATA_DIR, 'world_book.sqlite3')
 TABLES_TO_CLEAR = ["general_knowledge", "pending_entries", "community_members"]
 
 # --- 连接 ChromaDB ---
 try:
-    client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
+    client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
     print(f"✅ 成功连接到 ChromaDB")
-    print(f"   - 数据库路径: {CHROMA_DB_DIR}")
+    print(f"   - 数据库路径: {CHROMA_DB_PATH}")
 except Exception as e:
     print(f"❌ 连接 ChromaDB 失败: {e}")
     exit()
