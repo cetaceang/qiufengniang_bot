@@ -148,3 +148,6 @@ Thumbs.db
 # Chroma DB files
 data/chroma_db/
 data/world_book.sqlite3
+
+# Log files
+data/bot_debug.log*
