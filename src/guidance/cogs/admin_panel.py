@@ -36,7 +36,8 @@ class AdminPanel(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="新人引导管理面板", description="打开集成的多功能新人引导管理面板。", default_permissions=discord.Permissions(manage_guild=True))
+    @app_commands.command(name="新人引导管理面板", description="打开集成的多功能新人引导管理面板。")
+    @app_commands.default_permissions(manage_guild=True)
     @is_authorized()
     async def open_admin_panel(self, interaction: discord.Interaction):
         """
