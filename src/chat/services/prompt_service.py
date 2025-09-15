@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 from PIL import Image
 import io
+import json # 导入 json 模块
 
 from google.genai import types
 
@@ -76,9 +77,9 @@ class PromptService:
         current_user_parts = []
         text_part_content = ""
         if message:
-            text_part_content = f'{user_name}: {message}'
+            text_part_content = f'[user]: {user_name}: {message}'
         elif images:
-            text_part_content = f'{user_name}: (图片消息)'
+            text_part_content = f'[user]: {user_name}: (图片消息)'
         
         if text_part_content:
             current_user_parts.append(text_part_content)
@@ -123,7 +124,7 @@ class PromptService:
         
         if all_contents:
             subject_name = entries[0].get('id', '多个主题')
-            header = f"这是关于 '{subject_name}' 的一些背景知识，请你在与 {user_name} 的对话中参考：\n"
+            header = f"这是关于 '{subject_name}' 的一些记忆，可能与当前对话相关，也可能不相关。请你酌情参考：\n"
             body = "\n---\n".join(all_contents)
             return f"{header}<world_book_context>\n{body}\n</world_book_context>"
         

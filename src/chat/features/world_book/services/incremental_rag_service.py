@@ -193,13 +193,16 @@ class IncrementalRAGService:
             return False
         
         # 从数据库获取成员信息
+        log.debug(f"尝试处理社区成员档案: {member_id}")
         member_data = self._get_community_member_data(member_id)
         if not member_data:
             log.error(f"无法找到社区成员数据: {member_id}")
             return False
+        log.debug(f"成功获取社区成员数据: {member_id}")
         
         # 构建RAG条目格式
         rag_entry = self._build_rag_entry_from_member(member_data)
+        log.debug(f"为社区成员 {member_id} 构建RAG条目: {rag_entry.get('id')}")
         
         # 处理并添加到向量数据库
         success = await self._process_single_entry(rag_entry)
@@ -241,19 +244,21 @@ class IncrementalRAGService:
                 )
                 nicknames = [row['nickname'] for row in cursor.fetchall()]
                 member_dict['discord_nickname'] = nicknames
+                log.debug(f"获取社区成员 {member_id} 的昵称: {nicknames}")
                 
                 return member_dict
                 
         except Exception as e:
             log.error(f"获取社区成员数据时出错: {e}", exc_info=True)
         finally:
-            conn.close()
+            if conn:
+                conn.close()
         
         return None
     
     def _build_rag_entry_from_member(self, member_data: Dict[str, Any]) -> Dict[str, Any]:
         """将社区成员数据构建为RAG条目格式"""
-        return {
+        rag_entry = {
             'id': member_data['id'],
             'title': member_data.get('title', member_data['id']),
             'name': member_data.get('content', {}).get('name', '未命名'),
@@ -266,6 +271,8 @@ class IncrementalRAGService:
             },
             'discord_nickname': member_data.get('discord_nickname', [])
         }
+        log.debug(f"构建的社区成员 RAG 条目: {rag_entry['id']}")
+        return rag_entry
     
     async def _process_single_entry(self, entry: Dict[str, Any]) -> bool:
         """
@@ -278,24 +285,28 @@ class IncrementalRAGService:
             bool: 处理成功返回True，否则返回False
         """
         if not self.is_ready():
+            log.warning(f"RAG服务尚未准备就绪，无法处理条目 {entry.get('id')}")
             return False
         
         try:
+            entry_id = entry.get('id', '未知ID')
+            log.debug(f"开始处理单个条目: {entry_id}")
+
             # 构建文档文本
             document_text = build_document_text(entry)
             if not document_text:
-                log.error(f"无法为条目 {entry['id']} 构建文档文本")
+                log.error(f"无法为条目 {entry_id} 构建文档文本")
                 return False
             
-            log.info(f"为条目 {entry['id']} 构建文档文本成功")
+            log.debug(f"为条目 {entry_id} 构建文档文本成功，长度: {len(document_text)}")
             
             # 文本分块
             chunks = create_text_chunks(document_text, max_chars=1000)
             if not chunks:
-                log.warning(f"条目 {entry['id']} 的内容无法分块")
+                log.warning(f"条目 {entry_id} 的内容无法分块或分块后为空")
                 return False
             
-            log.info(f"条目 {entry['id']} 被分割成 {len(chunks)} 个块")
+            log.debug(f"条目 {entry_id} 被分割成 {len(chunks)} 个块")
             
             # 为每个块生成嵌入并添加到向量数据库
             ids_to_add = []
@@ -304,12 +315,13 @@ class IncrementalRAGService:
             metadatas_to_add = []
             
             for chunk_index, chunk_content in enumerate(chunks):
-                chunk_id = f"{entry['id']}:{chunk_index}"
+                chunk_id = f"{entry_id}:{chunk_index}"
+                log.debug(f"正在为块 {chunk_id} 生成嵌入向量...")
                 
                 # 生成嵌入向量
                 embedding = await self.gemini_service.generate_embedding(
                     text=chunk_content,
-                    title=entry.get('title', entry['id']),
+                    title=entry.get('title', entry_id),
                     task_type="retrieval_document"
                 )
                 
@@ -318,26 +330,27 @@ class IncrementalRAGService:
                     documents_to_add.append(chunk_content)
                     embeddings_to_add.append(embedding)
                     metadatas_to_add.append(entry.get('metadata', {}))
-                    log.info(f"成功为块 {chunk_id} 生成嵌入向量")
+                    log.debug(f"成功为块 {chunk_id} 生成嵌入向量")
                 else:
                     log.error(f"无法为块 {chunk_id} 生成嵌入向量")
             
             # 批量添加到向量数据库
             if ids_to_add:
+                log.debug(f"尝试将 {len(ids_to_add)} 个文档块添加到向量数据库...")
                 self.vector_db_service.add_documents(
                     ids=ids_to_add,
                     documents=documents_to_add,
                     embeddings=embeddings_to_add,
                     metadatas=metadatas_to_add
                 )
-                log.info(f"成功将 {len(ids_to_add)} 个文档块添加到向量数据库")
+                log.info(f"成功将 {len(ids_to_add)} 个文档块添加到向量数据库，条目 {entry_id} 处理完成。")
                 return True
             else:
-                log.warning(f"没有成功生成任何嵌入向量，条目 {entry['id']} 未添加到向量数据库")
+                log.warning(f"没有成功生成任何嵌入向量，条目 {entry_id} 未添加到向量数据库")
                 return False
                 
         except Exception as e:
-            log.error(f"处理条目 {entry['id']} 时发生错误: {e}", exc_info=True)
+            log.error(f"处理条目 {entry_id} 时发生错误: {e}", exc_info=True)
             return False
     
     async def process_general_knowledge(self, entry_id: str) -> bool:
@@ -354,14 +367,17 @@ class IncrementalRAGService:
             log.warning("RAG服务尚未准备就绪，无法处理通用知识条目")
             return False
         
+        log.debug(f"尝试处理通用知识条目: {entry_id}")
         # 从数据库获取通用知识条目
         entry_data = self._get_general_knowledge_data(entry_id)
         if not entry_data:
             log.error(f"无法找到通用知识条目: {entry_id}")
             return False
+        log.debug(f"成功获取通用知识条目数据: {entry_id}")
         
         # 构建RAG条目格式
         rag_entry = self._build_rag_entry_from_general_knowledge(entry_data)
+        log.debug(f"为通用知识条目 {entry_id} 构建RAG条目: {rag_entry.get('id')}")
         
         # 处理并添加到向量数据库
         success = await self._process_single_entry(rag_entry)
@@ -382,30 +398,44 @@ class IncrementalRAGService:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, title, name, content_text, category_name, contributor_id, created_at "
-                "FROM general_knowledge WHERE id = ?",
+                "SELECT gk.id, gk.title, gk.name, gk.content_json, c.name as category_name "
+                "FROM general_knowledge gk "
+                "LEFT JOIN categories c ON gk.category_id = c.id "
+                "WHERE gk.id = ?",
                 (entry_id,)
             )
             entry_row = cursor.fetchone()
             
             if entry_row:
                 entry_dict = dict(entry_row)
+                log.debug(f"从数据库获取通用知识条目 {entry_id} 成功。")
                 return entry_dict
                 
         except Exception as e:
             log.error(f"获取通用知识条目数据时出错: {e}", exc_info=True)
         finally:
-            conn.close()
+            if conn:
+                conn.close()
         
         return None
     
     def _build_rag_entry_from_general_knowledge(self, entry_data: Dict[str, Any]) -> Dict[str, Any]:
         """将通用知识数据构建为RAG条目格式"""
-        return {
+        # 从 content_json 中提取内容文本
+        content_text = ''
+        if entry_data.get('content_json'):
+            try:
+                import json
+                content_dict = json.loads(entry_data['content_json'])
+                content_text = content_dict.get('description', '')
+            except (json.JSONDecodeError, TypeError):
+                content_text = entry_data.get('content_json', '')
+        
+        rag_entry = {
             'id': f"db_{entry_data['id']}",
             'title': entry_data.get('title', entry_data.get('name', entry_data['id'])),
             'name': entry_data.get('name', entry_data['id']),
-            'content': entry_data.get('content_text', ''),
+            'content': content_text,
             'metadata': {
                 'category': entry_data.get('category_name', '通用知识'),
                 'source': 'database',
@@ -413,6 +443,56 @@ class IncrementalRAGService:
                 'created_at': entry_data.get('created_at')
             }
         }
+        log.debug(f"构建的通用知识 RAG 条目: {rag_entry['id']}")
+        return rag_entry
+
+    async def delete_entry(self, entry_id: str) -> bool:
+        """
+        从向量数据库中删除与指定条目ID相关的所有文档块。
+
+        Args:
+            entry_id: 要删除的主条目ID (例如 community_members 的 id)。
+
+        Returns:
+            bool: 删除成功返回True，否则返回False。
+        """
+        if not self.is_ready():
+            log.warning(f"RAG服务尚未准备就绪，无法删除条目 {entry_id}")
+            return False
+
+        try:
+            # ChromaDB 的 get 方法可以按 ID 前缀过滤
+            # 我们需要找到所有以 "entry_id:" 开头的文档
+            # 注意：ChromaDB 的 get() 方法目前不直接支持前缀搜索。
+            # 我们需要获取所有文档然后自己过滤，或者使用 where 查询。
+            # 一个更高效的方法是，如果知道分块数量，就直接生成ID。
+            # 但我们不知道，所以采用 where 查询。
+            
+            # 为了避免潜在的SQL注入风险（尽管这里不是SQL），我们使用 where 子句
+            # ChromaDB 的 ID 是字符串，所以 entry_id 必须是字符串
+            str_entry_id = str(entry_id)
+            
+            # 使用 get 方法获取与主 ID 相关的所有条目
+            # 我们只需要 id 字段来执行删除
+            # 备用策略：获取集合中的所有ID，然后在本地进行过滤。
+            # 这在集合很大时效率很低。
+            all_ids = self.vector_db_service.get_all_ids()
+            ids_to_delete = [doc_id for doc_id in all_ids if doc_id.startswith(f"{str_entry_id}:")]
+
+            if not ids_to_delete:
+                log.warning(f"在向量数据库中没有找到与条目 {entry_id} 相关的文档块可供删除。")
+                return True # 认为操作成功，因为目标状态（不存在）已达成
+
+            log.debug(f"找到 {len(ids_to_delete)} 个与条目 {entry_id} 相关的文档块，准备删除: {ids_to_delete}")
+            
+            self.vector_db_service.delete_documents(ids=ids_to_delete)
+            
+            log.info(f"成功删除了与条目 {entry_id} 相关的 {len(ids_to_delete)} 个文档块。")
+            return True
+
+        except Exception as e:
+            log.error(f"删除条目 {entry_id} 的向量时发生错误: {e}", exc_info=True)
+            return False
 
 # 全局实例
 incremental_rag_service = IncrementalRAGService()
