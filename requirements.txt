@@ -4,6 +4,12 @@ python-dotenv
 Pillow
 requests
 google-genai
+google-api-core
 PyYAML
 chromadb
-objgraph
+
+# Web UI 依赖
+Flask
+gunicorn
+docker
+psutil
