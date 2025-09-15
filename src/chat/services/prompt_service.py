@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone, timedelta
 from PIL import Image
 import io
-import json # 导入 json 模块
+import json
+import re
 
 from google.genai import types
 
@@ -13,6 +14,8 @@ from src.chat.config.prompts import SYSTEM_PROMPT
 from src import config
 
 log = logging.getLogger(__name__)
+
+EMOJI_PLACEHOLDER_REGEX = re.compile(r'__EMOJI_(\w+)__')
 
 class PromptService:
     """
@@ -32,7 +35,6 @@ class PromptService:
     ) -> List[Dict[str, Any]]:
         """
         构建用于AI聊天的分层对话历史。
-
         此方法将单一的系统提示动态拆分为多个部分，并按顺序注入到对话历史中，
         形成一个结构化的、引导式的上下文，以提高AI的稳定性和可控性。
         """
@@ -73,27 +75,69 @@ class PromptService:
             final_conversation.extend(channel_context)
             log.debug(f"已合并频道上下文，长度为: {len(channel_context)}")
 
-        # --- 4. 当前用户输入注入 ---
+        # --- 4. 当前用户输入注入---
         current_user_parts = []
-        text_part_content = ""
-        if message:
-            text_part_content = f'[user]: {user_name}: {message}'
-        elif images:
-            text_part_content = f'[user]: {user_name}: (图片消息)'
         
-        if text_part_content:
-            current_user_parts.append(text_part_content)
+        # 分离表情图片和附件图片
+        emoji_map = {img['name']: img for img in images if img.get('source') == 'emoji'} if images else {}
+        attachment_images = [img for img in images if img.get('source') == 'attachment'] if images else []
 
-        if images:
-            for i, img_data in enumerate(images):
-                image_bytes = img_data.get('data')
-                if image_bytes:
+        # 处理文本和交错的表情图片
+        if message:
+            last_end = 0
+            processed_parts = []
+
+            for match in EMOJI_PLACEHOLDER_REGEX.finditer(message):
+                # 1. 添加上一个表情到这个表情之间的文本
+                text_segment = message[last_end:match.start()]
+                if text_segment:
+                    processed_parts.append(text_segment)
+
+                # 2. 添加表情图片
+                emoji_name = match.group(1)
+                if emoji_name in emoji_map:
                     try:
-                        pil_image = Image.open(io.BytesIO(image_bytes))
-                        current_user_parts.append(pil_image)
-                        log.debug(f"图片附件 {i+1} 成功转换为 PIL.Image 对象。")
+                        pil_image = Image.open(io.BytesIO(emoji_map[emoji_name]['data']))
+                        processed_parts.append(pil_image)
                     except Exception as e:
-                        log.error(f"Pillow 无法打开图片附件 {i+1}。错误: {e}。")
+                        log.error(f"Pillow 无法打开表情图片 {emoji_name}。错误: {e}。")
+                
+                last_end = match.end()
+            
+            # 3. 添加最后一个表情后面的文本
+            remaining_text = message[last_end:]
+            if remaining_text:
+                processed_parts.append(remaining_text)
+            
+            # 4. 为第一个文本部分添加用户名前缀
+            if processed_parts:
+                # 寻找第一个字符串类型的元素
+                first_text_index = -1
+                for i, part in enumerate(processed_parts):
+                    if isinstance(part, str):
+                        first_text_index = i
+                        break
+                
+                if first_text_index != -1:
+                    # 在第一个文本元素前加上前缀
+                    processed_parts[first_text_index] = f'[user]: {user_name}: {processed_parts[first_text_index]}'
+                else:
+                    # 如果全是图片，没有文本，就在最前面加上前缀
+                    processed_parts.insert(0, f'[user]: {user_name}: ')
+
+            current_user_parts.extend(processed_parts)
+
+        # 如果没有任何文本，但有附件，添加一个默认的用户标签
+        if not message and attachment_images:
+            current_user_parts.append(f'[user]: {user_name}: (图片消息)')
+
+        # 追加所有附件图片到末尾
+        for img_data in attachment_images:
+            try:
+                pil_image = Image.open(io.BytesIO(img_data['data']))
+                current_user_parts.append(pil_image)
+            except Exception as e:
+                log.error(f"Pillow 无法打开附件图片。错误: {e}。")
         
         if current_user_parts:
             # Gemini API 不允许连续的 'user' 角色消息。
@@ -130,7 +174,7 @@ class PromptService:
         
         return ""
 
-    def build_rag_summary_prompt(self, latest_query: str, user_name: str, conversation_history: Optional[List[Dict[str, any]]]) -> str:
+    def build_rag_summary_prompt(self, latest_query: str, user_name: str, conversation_history: Optional[List[Dict[str, Any]]]) -> str:
         """
         构建用于生成RAG搜索独立查询的提示。
         """
@@ -149,13 +193,13 @@ class PromptService:
 你是一个严谨的查询分析助手。你的任务是根据下面提供的“对话历史”作为参考，将“用户的最新问题”改写成一个独立的、信息完整的查询，以便于进行向量数据库搜索。
 
 **核心规则:**
-1.  **解析代词**: 必须将问题中的代词（如“我”、“我的”、“你”）替换为具体的实体。使用提问者的名字（`{user_name}`）来替换“我”或“我的”。
-2.  **绝对忠于最新问题**: 你的输出必须基于“用户的最新问题”。“对话历史”仅用于补充信息。
-3.  **仅使用提供的信息**: **严禁使用任何对话历史之外的背景知识或进行联想猜测。**
-4.  **历史无关则直接使用**: 如果问题本身已经信息完整且不包含需要解析的代词，就直接使用它，只需做少量清理（如移除语气词）。
-5.  **保持意图**: 不要改变用户原始的查询意图。
-6.  **简洁明了**: 移除无关的闲聊，生成一个清晰、直接的查询。
-7.  **只输出结果**: 你的最终回答只能包含优化后的查询文本，绝对不能包含任何解释、前缀或引号。
+1. 解析代词: 必须将问题中的代词（如“我”、“我的”、“你”）替换为具体的实体。使用提问者的名字（`{user_name}`）来替换“我”或“我的”。
+2. 绝对忠于最新问题: 你的输出必须基于“用户的最新问题”。“对话历史”仅用于补充信息。
+3. **仅使用提供的信息**: 严禁使用任何对话历史之外的背景知识或进行联想猜测。
+4. 历史无关则直接使用: 如果问题本身已经信息完整且不包含需要解析的代词，就直接使用它，只需做少量清理（如移除语气词）。
+5. 保持意图: 不要改变用户原始的查询意图。
+6. 简洁明了: 移除无关的闲聊，生成一个清晰、直接的查询。
+7. 只输出结果: 你的最终回答只能包含优化后的查询文本，绝对不能包含任何解释、前缀或引号。
 
 ---
 

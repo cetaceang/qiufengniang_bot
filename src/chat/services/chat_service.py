@@ -111,13 +111,8 @@ class ChatService:
                 log.error(f"为用户 {author.id} 发放每日对话奖励时出错: {coin_e}")
 
             # 4. --- 调用AI生成回复 ---
-            # 检查 channel_context 的最后一条消息是否已经是用户的最新消息
-            # 如果是，则将 message 参数设为 None，以避免重复
+            # PromptService 内部会处理合并用户消息的逻辑，这里我们总是传递 final_content
             message_to_send = final_content if final_content.strip() else None
-            if channel_context and channel_context[-1].get("role") == "user":
-                # 假设 channel_context 最后一条 user 消息已经包含了用户输入
-                # 为了避免重复，我们不发送 final_content
-                message_to_send = None
             
             ai_response = await gemini_service.generate_response(
                 author.id,

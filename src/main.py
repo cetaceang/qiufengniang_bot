@@ -9,7 +9,7 @@ import time
 import requests
 from discord.ext import commands
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timezone
 
 current_script_path = os.path.abspath(__file__)
 current_dir = os.path.dirname(current_script_path)
@@ -41,7 +41,7 @@ def heartbeat_sender():
 
         try:
             payload = {
-            "timestamp":datetime.utcnow().isoformat() +'Z',
+            "timestamp":datetime.now(timezone.utc).isoformat(),
             "logs":logs_to_send
             }
             response = requests.post(log_server_url,json=payload,timeout=2.0)
@@ -60,6 +60,15 @@ load_dotenv()
 from src import config
 from src.guidance.utils.database import guidance_db_manager
 from src.chat.utils.database import chat_db_manager
+from src.chat.features.world_book.database.world_book_db_manager import world_book_db_manager
+
+if sys.platform != "win32":
+    try:
+        import uvloop
+        uvloop.install()
+        logger.info("已成功启用 uvloop 作为 asyncio 事件循环")
+    except ImportError:
+        logger.warning("尝试启用 uvloop 失败，将使用默认事件循环")
 
 def setup_logging():
     """
@@ -158,9 +167,16 @@ class GuidanceBot(commands.Bot):
         # 将解析出的列表存储为实例属性，以便在 on_ready 中使用
         self.debug_guild_ids = debug_guilds
 
-        # 使用 debug_guilds 参数初始化机器人
-        # 这会将所有斜杠命令自动注册为服务器命令，实现快速更新
-        super().__init__(command_prefix="!", intents=intents, debug_guilds=self.debug_guild_ids)
+        # 根据是否存在代理和 debug_guilds 来决定初始化参数
+        init_kwargs = {
+            "command_prefix": "!",
+            "intents": intents,
+            "debug_guilds": self.debug_guild_ids,
+        }
+        if config.PROXY_URL:
+            init_kwargs["proxy"] = config.PROXY_URL
+        
+        super().__init__(**init_kwargs)
 
     async def setup_hook(self):
         """
@@ -226,7 +242,8 @@ class GuidanceBot(commands.Bot):
         """当机器人成功连接到 Discord 时调用"""
         log = logging.getLogger(__name__)
         log.info(f'--- 机器人已上线 ---')
-        log.info(f'登录用户: {self.user} (ID: {self.user.id})')
+        if self.user:
+            log.info(f'登录用户: {self.user} (ID: {self.user.id})')
         
         # 同步并列出所有命令，包括子命令
         log.info("--- 机器人已加载的命令 ---")
@@ -286,7 +303,10 @@ async def main():
     # 3. 异步初始化数据库
     log.info("正在异步初始化数据库...")
     await guidance_db_manager.init_async()
-    log.info("正在异步初始化 Chat 数据库...")
+    log.info("初始化 Chat 数据库...")
+
+    log.info("初始化 World Book 数据库...")
+    await world_book_db_manager.init_async()
     await chat_db_manager.init_async()
 
     # 3.5. 初始化商店商品

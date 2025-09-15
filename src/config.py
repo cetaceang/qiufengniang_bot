@@ -28,6 +28,9 @@ def _parse_ids(env_var: str) -> set[int]:
 # 用于在开发时快速同步命令，请在 .env 文件中设置
 GUILD_ID = os.getenv("GUILD_ID")
 
+# --- 代理配置 ---
+PROXY_URL = os.getenv("PROXY_URL")
+
 # --- 权限控制 ---
 # 从 .env 文件加载并解析拥有管理权限的用户和角色 ID
 DEVELOPER_USER_IDS = _parse_ids("DEVELOPER_USER_IDS")
@@ -35,7 +38,8 @@ ADMIN_ROLE_IDS = _parse_ids("ADMIN_ROLE_IDS")
 
 # --- AI 身份配置 ---
 # 用于识别AI自身发布的消息，请在 .env 文件中设置
-BRAIN_GIRL_APP_ID = int(os.getenv("BRAIN_GIRL_APP_ID")) if os.getenv("BRAIN_GIRL_APP_ID") else None
+_brain_girl_app_id = os.getenv("BRAIN_GIRL_APP_ID")
+BRAIN_GIRL_APP_ID = int(_brain_girl_app_id) if _brain_girl_app_id and _brain_girl_app_id.isdigit() else None
 
 # --- 交互视图相关 ---
 VIEW_TIMEOUT = 300  # 交互视图的超时时间（秒），例如按钮、下拉菜单

@@ -142,12 +142,9 @@ Thumbs.db
 
 # Project specific
 *.db
-.env
 !*.example
 
-# Chroma DB files
-data/chroma_db/
-data/world_book.sqlite3
+data/
 
 # Web UI
 logs/
