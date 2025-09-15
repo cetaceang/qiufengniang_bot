@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 
 from src import config
 from src.chat.config import chat_config
+from src.chat.features.world_book.services.incremental_rag_service import incremental_rag_service
+import asyncio
+import re
 
 log = logging.getLogger(__name__)
 
@@ -128,15 +131,21 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         category = self.category_input.value.strip()
         title = self.title_input.value.strip()
         content = self.content_input.value.strip()
-        
+
         if category not in AVAILABLE_CATEGORIES:
             await interaction.response.send_message(f"无效的类别。请从以下选项中选择: {', '.join(AVAILABLE_CATEGORIES)}", ephemeral=True)
             return
-            
+
         if not all([category, title, content]):
             await interaction.response.send_message("类别、标题和内容均不能为空。", ephemeral=True)
             return
-            
+
+        # --- 开发者后门逻辑 ---
+        if interaction.user.id in config.DEVELOPER_USER_IDS:
+            await self.developer_direct_add(interaction, category, title, content)
+            return
+        # --- 结束 ---
+
         knowledge_data = {
             'category_name': category,
             'title': title,
@@ -145,9 +154,9 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
             'contributor_id': interaction.user.id,
             'contributor_name': interaction.user.display_name
         }
-        
+
         pending_id = await self.create_pending_entry(interaction, knowledge_data)
-        
+
         if not pending_id:
             await interaction.response.send_message("提交审核时发生错误，请稍后再试。", ephemeral=True)
             return
@@ -174,13 +183,12 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         embed.add_field(name="类别", value=category, inline=True)
         embed.add_field(name="标题", value=title, inline=False)
         embed.add_field(name="内容预览", value=content[:500] + ('...' if len(content) > 500 else ''), inline=False)
-        
-        # 在 footer 中添加投票规则，使其不那么显眼
+
         duration = REVIEW_SETTINGS['review_duration_minutes']
         approval_threshold = REVIEW_SETTINGS['approval_threshold']
         instant_approval_threshold = REVIEW_SETTINGS['instant_approval_threshold']
         rejection_threshold = REVIEW_SETTINGS['rejection_threshold']
-        
+
         rules_text = (
             f"投票规则: {VOTE_EMOJI} 达到{approval_threshold}个通过 | "
             f"{VOTE_EMOJI} {duration}分钟内达到{instant_approval_threshold}个立即通过 | "
@@ -189,8 +197,55 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         footer_text = f"提交者: {interaction.user.display_name} (ID: {interaction.user.id}) | 审核ID: {pending_id} | {rules_text}"
         embed.set_footer(text=footer_text)
         embed.timestamp = interaction.created_at
-        
+
         review_message = await interaction.followup.send(embed=embed, wait=True)
-        
+
         await self.update_message_id_for_pending_entry(pending_id, review_message.id)
+
+    async def developer_direct_add(self, interaction: discord.Interaction, category_name: str, title: str, content_text: str):
+        """开发者直接添加知识条目，无需审核"""
+        conn = self._get_world_book_connection()
+        if not conn:
+            await interaction.response.send_message("❌ 数据库连接失败。", ephemeral=True)
+            return
+
+        try:
+            cursor = conn.cursor()
+
+            # 查找或创建类别
+            cursor.execute("SELECT id FROM categories WHERE name = ?", (category_name,))
+            category_row = cursor.fetchone()
+            if category_row:
+                category_id = category_row[0]
+            else:
+                cursor.execute("INSERT INTO categories (name) VALUES (?)", (category_name,))
+                category_id = cursor.lastrowid
+                log.info(f"开发者 {interaction.user.id} 创建了新类别: {category_name}")
+
+            # 准备数据并插入
+            content_dict = {"description": content_text}
+            content_json = json.dumps(content_dict, ensure_ascii=False)
+            clean_title = re.sub(r'[^\w\u4e00-\u9fff]', '_', title)[:50]
+            import time
+            entry_id = f"{clean_title}_{int(time.time())}"
+
+            cursor.execute("""
+                INSERT INTO general_knowledge (id, title, name, content_json, category_id, contributor_id, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """, (entry_id, title, title, content_json, category_id, interaction.user.id, 'approved'))
+            
+            conn.commit()
+            log.info(f"开发者 {interaction.user.id} 已直接添加知识条目 '{title}' (ID: {entry_id})")
+
+            # 异步触发RAG更新
+            asyncio.create_task(incremental_rag_service.process_general_knowledge(entry_id))
+
+            await interaction.response.send_message(f"✅ **开发者后门**: 知识条目 **{title}** 已成功添加，无需审核。", ephemeral=True)
+
+        except Exception as e:
+            log.error(f"开发者直接添加知识条目时出错: {e}", exc_info=True)
+            conn.rollback()
+            await interaction.response.send_message(f"❌ 添加时发生内部错误: {e}", ephemeral=True)
+        finally:
+            conn.close()
         

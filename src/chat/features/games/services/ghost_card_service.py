@@ -221,19 +221,19 @@ class GhostCardService:
         player_hand = deck[::2]
         ai_hand = deck[1::2]
         
-        log.info(f"Game {game_id}: Player hand before discard: {player_hand}")
-        log.info(f"Game {game_id}: AI hand before discard: {ai_hand}")
+        # log.info(f"Game {game_id}: Player hand before discard: {player_hand}")
+        # log.info(f"Game {game_id}: AI hand before discard: {ai_hand}")
 
         # 初始配对消除
         player_hand = self._match_and_discard(player_hand)
         ai_hand = self._match_and_discard(ai_hand)
         
-        log.info(f"Game {game_id}: Player hand after discard: {player_hand} (count: {len(player_hand)})")
-        log.info(f"Game {game_id}: AI hand after discard: {ai_hand} (count: {len(ai_hand)})")
+        # log.info(f"Game {game_id}: Player hand after discard: {player_hand} (count: {len(player_hand)})")
+        # log.info(f"Game {game_id}: AI hand after discard: {ai_hand} (count: {len(ai_hand)})")
 
         # 决定谁先手
         first_turn = random.choice(["player", "ai"])
-        log.info(f"Game {game_id}: First turn: {first_turn}")
+        # log.info(f"Game {game_id}: First turn: {first_turn}")
         
         # 存储游戏状态
         self.active_games[game_id] = {

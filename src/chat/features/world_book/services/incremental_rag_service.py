@@ -477,8 +477,12 @@ class IncrementalRAGService:
             # 备用策略：获取集合中的所有ID，然后在本地进行过滤。
             # 这在集合很大时效率很低。
             all_ids = self.vector_db_service.get_all_ids()
-            ids_to_delete = [doc_id for doc_id in all_ids if doc_id.startswith(f"{str_entry_id}:")]
-
+            # 检查原始 ID 和带 'db_' 前缀的 ID
+            prefixed_id = f"db_{str_entry_id}"
+            ids_to_delete = [
+                doc_id for doc_id in all_ids
+                if doc_id.startswith(f"{str_entry_id}:") or doc_id.startswith(f"{prefixed_id}:")
+            ]
             if not ids_to_delete:
                 log.warning(f"在向量数据库中没有找到与条目 {entry_id} 相关的文档块可供删除。")
                 return True # 认为操作成功，因为目标状态（不存在）已达成

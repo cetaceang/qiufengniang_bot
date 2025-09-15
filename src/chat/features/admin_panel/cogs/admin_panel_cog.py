@@ -17,16 +17,20 @@ def is_admin_or_dev():
         if not config.ADMIN_ROLE_IDS and not config.DEVELOPER_USER_IDS:
             log.warning("ADMIN_ROLE_IDS 和 DEVELOPER_USER_IDS 未在 .env 文件中配置。")
             return False
-            
-        user_roles = [str(role.id) for role in interaction.user.roles]
-        is_admin = any(admin_id in user_roles for admin_id in config.ADMIN_ROLE_IDS)
-        is_dev = str(interaction.user.id) in config.DEVELOPER_USER_IDS
-        
+
+        user_roles = {role.id for role in interaction.user.roles}
+        user_id = interaction.user.id
+
+        # 检查用户是否是开发者
+        is_dev = user_id in config.DEVELOPER_USER_IDS
+        # 检查用户是否拥有管理员角色
+        is_admin = not user_roles.isdisjoint(config.ADMIN_ROLE_IDS)
+
         result = is_admin or is_dev
         if not result:
-            log.warning(f"用户 {interaction.user} (ID: {interaction.user.id}) 尝试执行管理员命令失败（权限不足）。")
+            log.warning(f"用户 {interaction.user} (ID: {user_id}) 尝试执行管理员命令失败（权限不足）。")
         return result
-    return commands.check(predicate)
+    return app_commands.check(predicate)
 
 
 class AdminPanelCog(commands.Cog):
@@ -52,6 +56,16 @@ class AdminPanelCog(commands.Cog):
             log.error(f"启动数据库浏览器时发生未知错误: {e}", exc_info=True)
             if not interaction.response.is_done():
                 await interaction.response.send_message(f"启动数据库浏览器时发生未知错误: {e}", ephemeral=True)
+
+    @db_view.error
+    async def on_db_view_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """db_view 命令的错误处理程序"""
+        if isinstance(error, app_commands.CheckFailure):
+            await interaction.response.send_message("抱歉，您没有权限使用此命令。", ephemeral=True)
+        else:
+            log.error(f"执行 db_view 命令时发生未处理的错误: {error}", exc_info=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"执行命令时发生未知错误: {error}", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     """将这个Cog添加到机器人中"""

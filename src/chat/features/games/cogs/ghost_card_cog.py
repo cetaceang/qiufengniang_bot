@@ -102,7 +102,7 @@ class GhostCardCog(commands.Cog):
             parts = custom_id.split("_")
             action = parts[1]
             
-            log.info(f"Handling interaction, action: {action}, custom_id: {custom_id}, parts: {parts}")
+            # log.info(f"Handling interaction, action: {action}, custom_id: {custom_id}, parts: {parts}")
             
             if action == "draw":
                 # 玩家点击抽牌，显示确认面板
@@ -117,11 +117,11 @@ class GhostCardCog(commands.Cog):
                 game_id = f"{user_id}_{guild_id}"
                 card_index = int(parts[4])
                 
-                log.info(f"Handling draw action for game_id: {game_id}, card_index: {card_index}")
+                # log.info(f"Handling draw action for game_id: {game_id}, card_index: {card_index}")
                 
                 game = ghost_card_service.get_game_state(game_id)
                 
-                log.info(f"Game state for {game_id}: {game}")
+                # log.info(f"Game state for {game_id}: {game}")
                 
                 if game and not game["game_over"]:
                     # 获取要抽的牌 (现在是从AI手牌中抽牌)
@@ -234,10 +234,10 @@ class GhostCardCog(commands.Cog):
     async def handle_confirmed_draw(self, interaction: discord.Interaction, game_id: str, card_index: int):
         """处理确认抽牌"""
         try:
-            log.info(f"Handling confirmed draw for game_id: {game_id}, card_index: {card_index}")
+            # log.info(f"Handling confirmed draw for game_id: {game_id}, card_index: {card_index}")
             success, message, reaction_text, reaction_image_url = ghost_card_service.player_draw_card(game_id, card_index)
             
-            log.info(f"Player draw result for {game_id}: success={success}, message={message}, reaction={reaction_text}")
+            # log.info(f"Player draw result for {game_id}: success={success}, message={message}, reaction={reaction_text}")
 
             if not success:
                 await interaction.followup.send(message, ephemeral=True)
