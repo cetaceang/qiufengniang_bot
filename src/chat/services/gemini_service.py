@@ -18,6 +18,7 @@ import io
 from google import genai
 from google.genai import types
 from google.api_core import exceptions as google_exceptions
+from google.genai import errors as genai_errors
 
 # 导入数据库管理器和提示词配置
 from src.chat.utils.database import chat_db_manager
@@ -28,6 +29,29 @@ from src.chat.services.regex_service import regex_service
 from src.chat.services.prompt_service import prompt_service
  
 log = logging.getLogger(__name__)
+
+# --- 设置专门用于记录无效 API 密钥的 logger ---
+# 确保 data 目录存在
+if not os.path.exists('data'):
+    os.makedirs('data')
+
+# 创建一个新的 logger 实例
+invalid_key_logger = logging.getLogger('invalid_api_keys')
+invalid_key_logger.setLevel(logging.ERROR)
+
+# 创建文件处理器，将日志写入到 data/invalid_api_keys.log
+# 使用 a 模式表示追加写入
+fh = logging.FileHandler('data/invalid_api_keys.log', mode='a', encoding='utf-8')
+fh.setLevel(logging.ERROR)
+
+# 创建格式化器并设置
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+
+# 为 logger 添加处理器
+# 防止重复添加处理器
+if not invalid_key_logger.handlers:
+    invalid_key_logger.addHandler(fh)
 
 class GeminiService:
     """Gemini AI 服务类，使用数据库存储用户对话上下文"""
@@ -251,6 +275,7 @@ class GeminiService:
             processed_contents = self._prepare_api_contents(final_conversation)
             
             # 3. Loop through API keys and attempt to get a response
+            encountered_service_unavailable = False
             for _ in range(len(self.clients)):
                 client = self.get_next_client()
                 if not client:
@@ -294,11 +319,39 @@ class GeminiService:
                         except Exception as e:
                             log.error(f"序列化问题请求体用于日志记录时失败: {e}")
 
+                except genai_errors.ClientError as e:
+                    if "API_KEY_INVALID" in str(e):
+                        key_to_remove = next((key for key, c in self.clients.items() if c == client), None)
+                        
+                        if key_to_remove:
+                            error_message = f"API 密钥 '{key_to_remove[:4]}...{key_to_remove[-4:]}' 已失效，将自动停用。"
+                            log.error(error_message)
+                            # 将失效的密钥记录到专门的日志文件中
+                            invalid_key_logger.error(f"无效密钥已停用: {key_to_remove}")
+
+                            del self.clients[key_to_remove]
+                            if self.clients and self.current_key_index >= len(self.clients):
+                                self.current_key_index = 0
+                            log.info(f"剩余可用密钥数量: {len(self.clients)}")
+                        else:
+                            log.error("检测到 API 密钥失效，但无法在当前客户端列表中定位该密钥。")
+                        
+                        continue
+                    else:
+                        # Bug修复：不再抛出异常中断循环，而是记录并继续
+                        log.warning(f"API 密钥 #{self.current_key_index} 遇到非致命客户端错误: {e}. 将尝试下一个密钥。")
+                        continue
                 except (google_exceptions.InternalServerError, google_exceptions.ServiceUnavailable, google_exceptions.ResourceExhausted) as e:
-                    log.warning(f"API 密钥 #{self.current_key_index} 遇到可重试的API错误: {e}. 将尝试下一个密钥。")
+                    if isinstance(e, google_exceptions.ServiceUnavailable):
+                        log.warning(f"API 密钥 #{self.current_key_index} 遇到 503 Service Unavailable 错误。将尝试下一个密钥。")
+                        encountered_service_unavailable = True
+                    else:
+                        log.warning(f"API 密钥 #{self.current_key_index} 遇到可重试的API错误: {e}. 将尝试下一个密钥。")
                     continue
             
             log.error(f"所有 API 密钥都未能为用户 {user_id} 生成有效回复。")
+            if encountered_service_unavailable:
+                return "类脑娘的...网络...似乎有些不稳定，请稍后...再试～"
             return "哎呀，我好像没太明白你的意思呢～可以再说清楚一点吗？✨"
                 
         except Exception as e:
@@ -362,6 +415,23 @@ class GeminiService:
                 else:
                     log.warning(f"API 密钥 #{self.current_key_index} 未能生成有效的嵌入。")
 
+            except genai_errors.ClientError as e:
+                if "API_KEY_INVALID" in str(e):
+                    key_to_remove = next((key for key, c in self.clients.items() if c == client), None)
+                    if key_to_remove:
+                        error_message = f"API 密钥 '{key_to_remove[:4]}...{key_to_remove[-4:]}' (嵌入) 已失效，将自动停用。"
+                        log.error(error_message)
+                        invalid_key_logger.error(f"无效密钥已停用 (嵌入任务): {key_to_remove}")
+                        
+                        del self.clients[key_to_remove]
+                        if self.clients and self.current_key_index >= len(self.clients):
+                            self.current_key_index = 0
+                        log.info(f"剩余可用密钥数量: {len(self.clients)}")
+                    continue
+                else:
+                    # Bug修复：不再抛出异常中断循环，而是记录并继续
+                    log.warning(f"API 密钥 #{self.current_key_index} (嵌入) 遇到非致命客户端错误: {e}. 将尝试下一个密钥。")
+                    continue
             except (google_exceptions.InternalServerError, google_exceptions.ServiceUnavailable, google_exceptions.ResourceExhausted) as e:
                 log.warning(f"API 密钥 #{self.current_key_index} 遇到可重试的API错误: {e}. 将尝试下一个密钥。")
                 continue
@@ -424,6 +494,23 @@ class GeminiService:
                 else:
                     log.warning(f"API 密钥 #{self.current_key_index} (generate_text) 未能生成有效文本。")
 
+            except genai_errors.ClientError as e:
+                if "API_KEY_INVALID" in str(e):
+                    key_to_remove = next((key for key, c in self.clients.items() if c == client), None)
+                    if key_to_remove:
+                        error_message = f"API 密钥 '{key_to_remove[:4]}...{key_to_remove[-4:]}' (generate_text) 已失效，将自动停用。"
+                        log.error(error_message)
+                        invalid_key_logger.error(f"无效密钥已停用 (generate_text 任务): {key_to_remove}")
+
+                        del self.clients[key_to_remove]
+                        if self.clients and self.current_key_index >= len(self.clients):
+                            self.current_key_index = 0
+                        log.info(f"剩余可用密钥数量: {len(self.clients)}")
+                    continue
+                else:
+                    # Bug修复：不再抛出异常中断循环，而是记录并继续
+                    log.warning(f"API 密钥 #{self.current_key_index} (generate_text) 遇到非致命客户端错误: {e}. 将尝试下一个密钥。")
+                    continue
             except Exception as e:
                 log.error(f"使用 API 密钥 #{self.current_key_index} (generate_text) 时出现意外错误: {e}", exc_info=True)
                 continue
