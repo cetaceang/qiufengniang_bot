@@ -1,12 +1,56 @@
-
-
 import os
 import asyncio
 import logging
+import threading
+import queue
 import sys
 import discord
+import time
+import requests
 from discord.ext import commands
 from dotenv import load_dotenv
+from datetime import datetime
+
+current_script_path = os.path.abspath(__file__)
+current_dir = os.path.dirname(current_script_path)
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)  
+
+# --- WebUI_start ---
+log_server_url = 'http://config_web:80/api/log'
+heartbeat_interval = 1.0 #心跳包间隔
+
+log_queue = queue.Queue()
+class QueueHandler(logging.Handler):
+    def __init__(self,log_queue):
+        super().__init__()
+        self.log_queue = log_queue
+    def emit(self,record):
+        self.log_queue.put(self.format(record)) #格式化后入列
+
+def heartbeat_sender():
+    while(1):
+        time.sleep(heartbeat_interval)
+        logs_to_send = []
+        while not log_queue.empty():
+            try:
+                logs_to_send.append(log_queue.get_nowait())
+            except queue.Empty:
+                break
+
+        try:
+            payload = {
+            "timestamp":datetime.utcnow().isoformat() +'Z',
+            "logs":logs_to_send
+            }
+            response = requests.post(log_server_url,json=payload,timeout=2.0)
+            if response.status_code !=200:
+                print(f"Heartbeat Error: Received status {response.status_code}",file=sys.stderr) #不适用logging
+
+        except requests.exceptions.RequestException as e:
+            print(f"Heartbeat Error: Could not connet to {log_server_url}.\nDetail:{e}",file=sys.stderr)
+# --- WebUI_end ---
 
 # 在所有其他导入之前，尽早加载环境变量
 # 这样可以确保所有模块在加载时都能访问到 .env 文件中定义的配置
@@ -64,10 +108,22 @@ def setup_logging():
     file_handler.setLevel(logging.DEBUG) # 文件记录 DEBUG 级别
     file_handler.setFormatter(log_formatter)
 
+    # --- webui ---
+    web_log_formatter = logging.Formatter(
+        '[%(asctime)s.%(msecs)03dZ] [%(levelname)s] [%(name)s] %(message)s',
+        datefmt='%Y-%m-%dT%H:%M:%S'
+    )
+    logging.Formatter.converter = time.gmtime
+
+    queue_handler = QueueHandler(log_queue)
+    queue_handler.setLevel(logging.DEBUG) #这里如果想在WebUI看到仅INFO以上日志，请在这里修改
+    queue_handler.setFormatter(web_log_formatter)
+
     # 6. 为根 logger 添加所有处理器
     root_logger.addHandler(stdout_handler)
     root_logger.addHandler(stderr_handler)
     root_logger.addHandler(file_handler)
+    root_logger.addHandler(queue_handler)
 
     # 5. 调整特定库的日志级别，以减少不必要的输出
     #    例如，google-generativeai 库在 INFO 级别会打印很多网络请求相关的日志
@@ -212,6 +268,7 @@ class GuidanceBot(commands.Bot):
         log.info("内存中数量最多的前 20 个对象类型:")
         objgraph.show_most_common_types(limit=20)
         log.info("--- 内存诊断结束 ---")
+        log.info("--- 启动成功 ---")
 
 
 async def main():
@@ -219,6 +276,12 @@ async def main():
     # 1. 配置日志
     setup_logging()
     log = logging.getLogger(__name__)
+
+    # --- webui心跳启动进程 --
+    log.info("启用webui心跳包")
+    sender_thread = threading.Thread(target=heartbeat_sender,daemon=True)
+    sender_thread.start()
+    log.info("Webui心跳包已启用")
 
     # 3. 异步初始化数据库
     log.info("正在异步初始化数据库...")

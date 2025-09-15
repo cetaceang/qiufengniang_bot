@@ -189,7 +189,8 @@ class WorldBookService:
             )
             
             if search_results:
-                log.debug(f"RAG 搜索简报 (ID 和 距离): {[f'{r['id']}({r['distance']:.4f})' for r in search_results]}")
+                search_brief = [f"{r['id']}({r['distance']:.4f})" for r in search_results]
+                log.debug(f"RAG 搜索简报 (ID 和 距离): {search_brief}")
             else:
                 log.debug("RAG 搜索未返回任何结果。")
 
