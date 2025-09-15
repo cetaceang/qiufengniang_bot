@@ -275,7 +275,13 @@ class GeminiService:
             processed_contents = self._prepare_api_contents(final_conversation)
             
             # 3. Loop through API keys and attempt to get a response
-            encountered_service_unavailable = False
+            # --- 增强的最终错误反馈逻辑 ---
+            # 1. 初始化多个状态标记
+            encountered_service_unavailable = False # 标记是否遇到过 503
+            encountered_quota_error = False       # 标记是否遇到过 429 (配额)
+            non_invalid_key_error_occurred = False # 标记是否遇到过除“密钥无效”外的其他错误
+
+            # 2. 开始轮询
             for _ in range(len(self.clients)):
                 client = self.get_next_client()
                 if not client:
@@ -340,18 +346,31 @@ class GeminiService:
                     else:
                         # Bug修复：不再抛出异常中断循环，而是记录并继续
                         log.warning(f"API 密钥 #{self.current_key_index} 遇到非致命客户端错误: {e}. 将尝试下一个密钥。")
+                        non_invalid_key_error_occurred = True
                         continue
                 except (google_exceptions.InternalServerError, google_exceptions.ServiceUnavailable, google_exceptions.ResourceExhausted) as e:
+                    non_invalid_key_error_occurred = True # 标记发生了其他类型的错误
                     if isinstance(e, google_exceptions.ServiceUnavailable):
                         log.warning(f"API 密钥 #{self.current_key_index} 遇到 503 Service Unavailable 错误。将尝试下一个密钥。")
                         encountered_service_unavailable = True
+                    elif isinstance(e, google_exceptions.ResourceExhausted):
+                        log.warning(f"API 密钥 #{self.current_key_index} 遇到 429 Resource Exhausted (配额) 错误。将尝试下一个密钥。")
+                        encountered_quota_error = True
                     else:
                         log.warning(f"API 密钥 #{self.current_key_index} 遇到可重试的API错误: {e}. 将尝试下一个密钥。")
                     continue
             
+            # 3. 根据标记提供更精确的最终反馈
             log.error(f"所有 API 密钥都未能为用户 {user_id} 生成有效回复。")
             if encountered_service_unavailable:
                 return "类脑娘的...网络...似乎有些不稳定，请稍后...再试～"
+            if encountered_quota_error:
+                return "类脑娘今天累啦,明天再来找她玩吧～"
+            if not non_invalid_key_error_occurred and not self.clients:
+                # 如果没有发生过其他错误，并且客户端列表为空，说明是所有key都因无效而被移除了
+                return "抱歉，所有AI接口都已失效，请联系管理员检查配置。"
+            
+            # 默认的最终 fallback 消息
             return "哎呀，我好像没太明白你的意思呢～可以再说清楚一点吗？✨"
                 
         except Exception as e:
