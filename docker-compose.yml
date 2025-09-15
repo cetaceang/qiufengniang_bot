@@ -1,0 +1,40 @@
+services:
+  bot_app:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    container_name: Odysseia_Guidance
+    volumes:
+      - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    # --- DEV请 取消 注释下面的command:sleep命令并且 注释 掉command: python ---
+    command: sleep infinity
+    #command: python -u src/main.py
+    networks:
+      - bot_network
+
+  config_web:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    container_name: config_web
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${CONFIG_WEB_PORT:-8080}:80"
+    networks:
+      - bot_network
+    depends_on:
+      - bot_app
+    volumes:
+      - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    # --- DEV请 取消 注释下面的command: sleep命令并且 注释 掉command: gunicorn ---
+    command: sleep infinity
+    #command: gunicorn --chdir ./web --workers 2 --bind 0.0.0.0:80 "web-main:web-app"
+
+networks:
+  bot_network:
+    driver: bridge
