@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 
 import logging
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 import discord
+from discord.ext import commands
 import re
 from src import config
 from src.chat.config import chat_config
@@ -17,13 +18,13 @@ class ContextServiceTest:
     """上下文管理服务测试版本，用于对比新的上下文处理逻辑"""
     
     def __init__(self):
-        self.bot = None
+        self.bot: Optional[commands.Bot] = None
     
-    def set_bot_instance(self, bot: 'discord.ext.commands.Bot'):
+    def set_bot_instance(self, bot: commands.Bot):
         self.bot = bot
         log.info("ContextServiceTest 已设置 bot 实例。")
     
-    async def get_formatted_channel_history_new(self, channel_id: int, user_id: int, guild_id: int, limit: int = chat_config.CHANNEL_MEMORY_CONFIG["formatted_history_limit"], exclude_message_id: Optional[int] = None) -> List[Dict[str, any]]:
+    async def get_formatted_channel_history_new(self, channel_id: int, user_id: int, guild_id: int, limit: int = chat_config.CHANNEL_MEMORY_CONFIG["formatted_history_limit"], exclude_message_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         获取结构化的频道对话历史。
         此方法将历史消息与用户的最新消息分离，以引导模型只回复最新内容。
@@ -37,7 +38,10 @@ class ContextServiceTest:
             try:
                 # 作为备用方案，尝试通过API获取，这可以找到公开帖子
                 channel = await self.bot.fetch_channel(channel_id)
-                log.info(f"通过 fetch_channel 成功获取到频道/帖子: {channel.name} (ID: {channel_id})")
+                if isinstance(channel, (discord.abc.GuildChannel, discord.Thread)):
+                    log.info(f"通过 fetch_channel 成功获取到频道/帖子: {channel.name} (ID: {channel_id})")
+                else:
+                    log.info(f"通过 fetch_channel 成功获取到频道 (ID: {channel_id})")
             except (discord.NotFound, discord.Forbidden):
                 log.warning(f"无法通过 get_channel 或 fetch_channel 找到 ID 为 {channel_id} 的频道或帖子。")
                 return []
@@ -70,21 +74,7 @@ class ContextServiceTest:
             if not after_message:
                 history_messages.reverse()
 
-            # 寻找并分离出最新的用户消息
-            latest_user_message_index = -1
-            for i in range(len(history_messages) - 1, -1, -1):
-                msg = history_messages[i]
-                is_bot = msg.author.id == self.bot.user.id or \
-                         (config.BRAIN_GIRL_APP_ID and msg.author.id == config.BRAIN_GIRL_APP_ID)
-                if not is_bot and msg.id == exclude_message_id:
-                    latest_user_message_index = i
-                    break
-            
-            if latest_user_message_index != -1:
-                latest_user_message = history_messages.pop(latest_user_message_index)
-                latest_user_message_content = f'[{latest_user_message.author.display_name}]: {self.clean_message_content(latest_user_message.content, latest_user_message.guild)}'
-
-            # 处理剩余的历史消息
+            # 处理历史消息
             for msg in history_messages:
                 is_irrelevant_type = msg.type not in (discord.MessageType.default, discord.MessageType.reply)
                 if is_irrelevant_type or msg.id == exclude_message_id:
@@ -139,13 +129,6 @@ class ContextServiceTest:
                 "parts": [model_reply]
             })
             
-            # 3. 将用户的最新消息作为最后一个 user 消息
-            if latest_user_message_content:
-                final_context.append({
-                    "role": "user",
-                    "parts": [latest_user_message_content]
-                })
-
             return final_context
         except discord.Forbidden:
             log.error(f"机器人没有权限读取频道 {channel_id} 的消息历史。")

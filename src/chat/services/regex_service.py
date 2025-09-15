@@ -37,8 +37,9 @@ class RegexService:
         text = re.sub(r'\{[^\}]*\}', '', text)
         text = re.sub(r'《[^》]*》', '', text)
 
-        # 移除XML/HTML标签
-        text = re.sub(r'<[^>]+>', '', text)
+        # 移除XML/HTML标签，但豁免Discord自定义表情格式 <a?:name:id>
+        # 使用负向前瞻断言来避免匹配表情
+        text = re.sub(r'<(?![a]?:[\w_]+:\d+>)[^>]+>', '', text)
 
         # 移除Markdown代码块 (```...``` 和 `...`)
         text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
