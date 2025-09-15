@@ -27,7 +27,8 @@ def initialize_database():
         discord_id TEXT,
         discord_number_id TEXT,
         history TEXT,
-        content_json TEXT
+        content_json TEXT,
+        status TEXT DEFAULT 'approved'
     )
     ''')
 
@@ -51,6 +52,7 @@ def initialize_database():
         category_id INTEGER,
         contributor_id INTEGER,  -- 添加 contributor_id 列
         created_at TEXT,         -- 添加 created_at 列
+        status TEXT DEFAULT 'approved',
         FOREIGN KEY (category_id) REFERENCES categories(id)
     )
     ''')
@@ -72,6 +74,22 @@ def initialize_database():
         entry_id TEXT NOT NULL,
         reference TEXT NOT NULL,
         FOREIGN KEY (entry_id) REFERENCES general_knowledge(id)
+    )
+    ''')
+
+    # Table for Pending Entries
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS pending_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_type TEXT NOT NULL,
+        data_json TEXT NOT NULL,
+        message_id INTEGER NOT NULL,
+        channel_id INTEGER NOT NULL,
+        guild_id INTEGER NOT NULL,
+        proposer_id INTEGER NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NOT NULL
     )
     ''')
 
