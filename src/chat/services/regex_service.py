@@ -24,19 +24,29 @@ class RegexService:
 
     def clean_user_input(self, text: str) -> str:
         """
-        清理用户的输入文本。
-        - 移除 (), [], <> 及其内部内容。
-        - 移除全角/半角括号和尖括号。
+        清理用户的输入文本，移除可能用于Prompt Injection的各种标记和格式。
+        - 移除各种括号及其内部内容: (), [], {}, <>
+        - 移除Markdown格式: 代码块, 引用, 标题
         """
         if not isinstance(text, str):
             return ""
 
-        # 匹配 (), （）
+        # 移除 (), （）, [], 【】, {}, 《》 及其内部内容
         text = re.sub(r'[\(（][^)）]*[\)）]:?\s*', '', text)
-        # 匹配 [], 【】
         text = re.sub(r'[\[【][^\]】]*[\]】]:?\s*', '', text)
-        # 匹配 <>
-        text = re.sub(r'[<][^>]*[>]:?\s*', '', text)
+        text = re.sub(r'\{[^\}]*\}', '', text)
+        text = re.sub(r'《[^》]*》', '', text)
+
+        # 移除XML/HTML标签
+        text = re.sub(r'<[^>]+>', '', text)
+
+        # 移除Markdown代码块 (```...``` 和 `...`)
+        text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+        text = re.sub(r'`[^`]*`', '', text)
+
+        # 移除Markdown引用和标题
+        text = re.sub(r'^\s*>\s*', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^\s*#+\s*', '', text, flags=re.MULTILINE)
         
         return text.strip()
 
