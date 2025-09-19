@@ -4,6 +4,9 @@ from typing import List, Dict, Any
 
 from src.chat.features.odysseia_coin.service.coin_service import coin_service, PERSONAL_MEMORY_ITEM_EFFECT_ID, WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID, COMMUNITY_MEMBER_UPLOAD_EFFECT_ID
 from src.chat.features.personal_memory.services.personal_memory_service import personal_memory_service
+from src.chat.features.affection.service.gift_service import GiftService
+from src.chat.features.affection.service.affection_service import affection_service
+from src.chat.services.gemini_service import gemini_service
 
 log = logging.getLogger(__name__)
 
@@ -165,83 +168,67 @@ class PurchaseButton(discord.ui.Button):
             await interaction.response.send_message("选择的商品无效。", ephemeral=True)
             return
 
-        # 执行购买逻辑
-        # 不再使用 defer 和 followup，而是直接处理并更新主界面
+        # 检查是否需要弹出模态框
+        item_effect = selected_item.get('effect_id')
+        modal_effects = [
+            WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID,
+            COMMUNITY_MEMBER_UPLOAD_EFFECT_ID,
+            PERSONAL_MEMORY_ITEM_EFFECT_ID
+        ]
+        is_modal_purchase = item_effect in modal_effects
+
+        # 如果不是模态框购买，则延迟响应
+        if not is_modal_purchase:
+            await interaction.response.defer(ephemeral=True)
+
         try:
-            success, message, _, should_show_modal = await coin_service.purchase_item(
+            success, message, new_balance, should_show_modal, should_generate_gift_response = await coin_service.purchase_item(
                 interaction.user.id,
                 interaction.guild.id if interaction.guild else 0,
                 selected_item['item_id']
             )
-            
-            # 如果购买成功且需要弹出模态框，则发送模态框
+
+            # 模态框处理
             if success and should_show_modal:
-                # 检查购买的商品类型
-                if selected_item['effect_id'] == WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID:
-                    # 导入世界之书贡献模态框类
-                    from src.chat.features.world_book.ui.contribution_modal import WorldBookContributionModal
-                    modal = WorldBookContributionModal()
-                    await interaction.response.send_modal(modal)
-                elif selected_item['effect_id'] == COMMUNITY_MEMBER_UPLOAD_EFFECT_ID:
-                    # 导入社区成员档案上传模态框类
-                    from src.chat.features.community_member.ui.community_member_modal import CommunityMemberUploadModal
-                    modal = CommunityMemberUploadModal()
-                    await interaction.response.send_modal(modal)
-                else:
-                    # 导入个人档案模态框类
-                    from src.chat.features.personal_memory.ui.profile_modal import ProfileEditModal
-                    modal = ProfileEditModal()
-                    await interaction.response.send_modal(modal)
-                return  # 不再执行后续的界面更新逻辑
+                modal_map = {
+                    WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID: "src.chat.features.world_book.ui.contribution_modal.WorldBookContributionModal",
+                    COMMUNITY_MEMBER_UPLOAD_EFFECT_ID: "src.chat.features.community_member.ui.community_member_modal.CommunityMemberUploadModal",
+                    PERSONAL_MEMORY_ITEM_EFFECT_ID: "src.chat.features.personal_memory.ui.profile_modal.ProfileEditModal"
+                }
+                modal_path = modal_map.get(selected_item['effect_id'])
+                if modal_path:
+                    parts = modal_path.split('.')
+                    module_path, class_name = '.'.join(parts[:-1]), parts[-1]
+                    module = __import__(module_path, fromlist=[class_name])
+                    ModalClass = getattr(module, class_name)
+                    await interaction.response.send_modal(ModalClass())
+                return
+
+            final_message = message
+            # AI 回应处理
+            if success and should_generate_gift_response:
+                gift_service = GiftService(gemini_service, affection_service)
+                try:
+                    ai_response = await gift_service.generate_gift_response(interaction.user, selected_item['name'])
+                    final_message += f"\n\n{ai_response}"
+                except Exception as e:
+                    log.error(f"为礼物 {selected_item['name']} 生成AI回应时出错: {e}")
+                    final_message += "\n\n（AI 在想感谢语时遇到了点小麻烦，但你的心意已经收到了！）"
             
-            # 更新主界面（余额和商品列表）
-            # 重新获取用户余额和商品列表
+            # 发送最终消息
+            # 购买失败的消息总是私有的
+            # 购买成功的消息（包含AI回应）现在也设置为私有的
+            await interaction.followup.send(final_message, ephemeral=True)
+
+            # 更新商店界面余额
             self.view.balance = await coin_service.get_balance(interaction.user.id)
-            self.view.items = await coin_service.get_all_items()
-            
-            # 重新按类别分组商品
-            self.view.grouped_items = {}
-            for item in self.view.items:
-                category = item['category']
-                if category not in self.view.grouped_items:
-                    self.view.grouped_items[category] = []
-                self.view.grouped_items[category].append(item)
-            
-            # 更新嵌入消息和视图
-            new_embed = self.view.create_shop_embed(purchase_message=message)
-            # 重新创建类别选择视图
-            self.view.clear_items()
-            self.view.add_item(CategorySelect(list(self.view.grouped_items.keys())))
-            self.view.add_item(PurchaseButton())
-            self.view.add_item(RefreshBalanceButton())
-            
-            # 编辑原始消息
-            await interaction.response.edit_message(embed=new_embed, view=self.view)
-            
+            new_embed = self.view.create_shop_embed()
+            await interaction.edit_original_response(embed=new_embed, view=self.view)
+
         except Exception as e:
             log.error(f"处理购买商品 {selected_item['item_id']} 时出错: {e}", exc_info=True)
-            # 即使出错也要更新界面
-            self.view.balance = await coin_service.get_balance(interaction.user.id)
-            self.view.items = await coin_service.get_all_items()
-            
-            error_message = "处理你的购买请求时发生了一个意想不到的错误。"
-            new_embed = self.view.create_shop_embed(purchase_message=error_message)
-            
-            # 重新按类别分组商品
-            self.view.grouped_items = {}
-            for item in self.view.items:
-                category = item['category']
-                if category not in self.view.grouped_items:
-                    self.view.grouped_items[category] = []
-                self.view.grouped_items[category].append(item)
-            
-            self.view.clear_items()
-            self.view.add_item(CategorySelect(list(self.view.grouped_items.keys())))
-            self.view.add_item(PurchaseButton())
-            self.view.add_item(RefreshBalanceButton())
-            
-            # 重新显示商店界面
-            await interaction.response.edit_message(embed=new_embed, view=self.view)
+            if not interaction.is_done():
+                await interaction.followup.send("处理你的购买请求时发生了一个意想不到的错误。", ephemeral=True)
 
 class RefreshBalanceButton(discord.ui.Button):
     """刷新余额按钮"""

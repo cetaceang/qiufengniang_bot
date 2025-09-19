@@ -169,6 +169,11 @@ class WorldBookService:
 
 
         # 3. 为总结出的查询生成嵌入
+        # 添加额外的空值检查，防止 clewdr 422 错误
+        if not summarized_query or not summarized_query.strip():
+            log.warning(f"总结后的查询为空或只包含空白字符，跳过嵌入生成: '{summarized_query}'")
+            return []
+            
         query_embedding = await self.gemini_service.generate_embedding(
             text=summarized_query,
             task_type="RETRIEVAL_QUERY"

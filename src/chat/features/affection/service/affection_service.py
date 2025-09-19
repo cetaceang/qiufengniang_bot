@@ -6,6 +6,7 @@ import yaml # 导入yaml库
 
 from src.chat.utils.database import chat_db_manager
 from src.chat.config.chat_config import AFFECTION_CONFIG
+from src.config import DEVELOPER_USER_IDS
 
 # --- 日志记录器 ---
 log = logging.getLogger(__name__)
@@ -131,10 +132,12 @@ class AffectionService:
         affection_data = await self._get_or_create_affection(user_id, guild_id)
         today = date.today().isoformat()
 
-        # 检查今天是否已经送过礼物
-        if affection_data.get('last_gift_date') == today:
+        # 检查今天是否已经送过礼物，但开发者不受此限制
+        if user_id not in DEVELOPER_USER_IDS and affection_data.get('last_gift_date') == today:
             log.info(f"用户 {user_id} 今天已经送过礼物了，送礼失败。")
             return False, "你今天已经送过礼物啦，类脑娘很开心，不过明天再来吧！"
+        elif user_id in DEVELOPER_USER_IDS:
+            log.info(f"开发者用户 {user_id} 正在送礼，已绕过每日限制。")
 
         # 增加好感度
         new_points = affection_data['affection_points'] + points_to_add
@@ -148,6 +151,23 @@ class AffectionService:
         log.info(f"用户 {user_id} 通过送礼增加了 {points_to_add} 点好感度。")
         return True, f"你送的礼物类脑娘很喜欢！好感度增加了 {points_to_add} 点。"
 
+
+    async def add_affection_points(self, user_id: int, guild_id: int, points_to_add: int) -> int:
+        """
+        直接为用户增加指定数量的好感度点数，不包含任何业务逻辑限制。
+        返回新的好感度总点数。
+        """
+        affection_data = await self._get_or_create_affection(user_id, guild_id)
+        
+        new_points = affection_data['affection_points'] + points_to_add
+        
+        await self.db.update_affection(
+            user_id, guild_id,
+            affection_points=new_points,
+            last_interaction_date=date.today().isoformat()
+        )
+        log.info(f"用户 {user_id} 的好感度直接增加了 {points_to_add} 点。新总点数: {new_points}")
+        return new_points
     async def get_affection_status(self, user_id: int, guild_id: int) -> Dict[str, Any]:
         """
         获取用户当前的好感度状态，包括点数和等级。

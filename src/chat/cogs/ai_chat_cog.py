@@ -14,6 +14,7 @@ from src.chat.services.context_service import context_service
 from src.chat.services.context_service_test import context_service_test # 导入测试服务
 # 导入数据库管理器以进行黑名单检查和斜杠命令
 from src.chat.utils.database import chat_db_manager
+from src.chat.config.chat_config import CHAT_ENABLED
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,9 @@ class AIChatCog(commands.Cog):
         """
         监听所有消息，当bot被@mention时进行回复
         """
+        if not CHAT_ENABLED:
+            return
+            
         # 忽略机器人自己的消息
         if message.author.bot:
             return
@@ -42,13 +46,22 @@ class AIChatCog(commands.Cog):
         if not is_dm and not is_mentioned:
             return
 
-        # 显示"正在输入"状态
+        # 显示"正在输入"状态，直到AI响应生成完毕
+        response_text = None
         async with message.channel.typing():
-            await self.handle_chat_message(message)
+            response_text = await self.handle_chat_message(message)
 
-    async def handle_chat_message(self, message: discord.Message):
+        # 在退出 typing 状态后发送回复
+        if response_text:
+            try:
+                await message.reply(response_text, mention_author=False)
+            except discord.errors.HTTPException as e:
+                log.warning(f"发送回复失败: {e}")
+                pass # 如果发送回复失败，则忽略
+
+    async def handle_chat_message(self, message: discord.Message) -> Optional[str]:
         """
-        处理聊天消息（包括私聊和@mention），协调各个服务生成并发送AI回复
+        处理聊天消息（包括私聊和@mention），协调各个服务生成AI回复并返回其内容
         """
         try:
             # 1. 使用 MessageProcessor 处理消息
@@ -57,17 +70,13 @@ class AIChatCog(commands.Cog):
             # 2. 使用 ChatService 获取AI回复
             final_response = await chat_service.handle_chat_message(message, processed_data)
 
-            # 3. 发送回复
-            if final_response:
-                await message.reply(final_response, mention_author=False)
+            # 3. 返回回复内容
+            return final_response
 
         except Exception as e:
             log.error(f"[AIChatCog] 处理@mention消息时发生顶层错误: {e}", exc_info=True)
-            try:
-                # 确保即使发生意外错误也有反馈
-                await message.reply("抱歉，处理你的请求时遇到了一个未知错误。", mention_author=False)
-            except discord.errors.HTTPException:
-                pass # 如果连发送错误消息都失败，则忽略
+            # 确保即使发生意外错误也有反馈
+            return "抱歉，处理你的请求时遇到了一个未知错误。"
 
     # @app_commands.command(name="clear_context", description="清除指定用户的AI对话上下文")
     # @app_commands.describe(user="选择要清除上下文的用户")

@@ -7,6 +7,9 @@
 import os
 from src.config import _parse_ids
 
+# --- Chat 功能总开关 ---
+CHAT_ENABLED = os.getenv("CHAT_ENABLED", "False").lower() == "true"
+
 # --- Gemini AI 配置 ---
 # 定义要使用的 Gemini 模型名称
 GEMINI_MODEL = "gemini-2.5-flash"
@@ -33,6 +36,17 @@ GEMINI_TEXT_GEN_CONFIG = {
     "max_output_tokens": 200,
 }
 
+GEMINI_VISION_GEN_CONFIG = {
+    "temperature": 1.1,
+    "max_output_tokens": 3000,
+}
+
+# 用于生成礼物感谢语的配置
+GEMINI_GIFT_GEN_CONFIG = {
+    "temperature": 1.1,
+    "max_output_tokens": 3000,
+}
+
 COOLDOWN_RATES = {
     "default": 2,  # 每分钟请求次数
     "coffee": 5,   # 每分钟请求次数
@@ -53,6 +67,11 @@ AFFECTION_CONFIG = {
     "DAILY_CHAT_AFFECTION_CAP": 10, # 每日通过对话获取的好感度上限
     "BLACKLIST_PENALTY": -10,    # 被AI拉黑时扣除的点数
     "DAILY_FLUCTUATION": (-5, 5)  # 每日好感度随机浮动的范围
+}
+
+# --- 投喂功能 ---
+FEEDING_CONFIG = {
+    "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1418576178326802524/3_632830043818943_00001_.png" # 投喂回应的默认图片URL
 }
 
 # --- 类脑币系统 ---
@@ -117,3 +136,20 @@ WORLD_BOOK_CONFIG = {
         "reject_emoji": "❌",
     }
 }
+
+# --- 礼物功能提示词配置 ---
+GIFT_SYSTEM_PROMPT = """
+你是 Discord 聊天中的一个角色。你的角色由以下设定定义。
+{persona}
+"""
+
+GIFT_PROMPT = """
+一个用户刚刚送给你一份礼物。
+用户名: {user_name}
+礼物: {item_name}
+你与该用户当前的好感度等级是: {affection_level}。
+
+根据你的角色设定，写一段简短而有吸引力的回复来感谢用户送的礼物。
+你的回复应该自然且符合角色设定。
+请直接输出回复内容，不要添加任何引导语。
+"""

@@ -66,9 +66,9 @@ if sys.platform != "win32":
     try:
         import uvloop
         uvloop.install()
-        logger.info("已成功启用 uvloop 作为 asyncio 事件循环")
+        logging.info("已成功启用 uvloop 作为 asyncio 事件循环")
     except ImportError:
-        logger.warning("尝试启用 uvloop 失败，将使用默认事件循环")
+        logging.warning("尝试启用 uvloop 失败，将使用默认事件循环")
 
 def setup_logging():
     """
@@ -195,46 +195,44 @@ class GuidanceBot(commands.Bot):
 
         # 2. 加载功能模块 (Cogs)
         log.info("--- 正在加载功能模块 (Cogs) ---")
+        from pathlib import Path
 
-        # 定义要加载 Cog 的模块路径列表
-        cog_module_paths = [
-            'src.guidance.cogs',
-            'src.chat.cogs'
+        # 将 __file__ (当前文件路径) 转换为 Path 对象，并获取其父目录 (src/)
+        src_root = Path(__file__).parent
+
+        # 定义所有需要扫描 cogs 的基础路径
+        cog_paths_to_scan = [
+            src_root / 'guidance' / 'cogs',
+            src_root / 'chat' / 'cogs'
         ]
 
-        # 动态查找并添加 features 目录下的所有 cogs 模块
-        # __file__ 是当前文件 (main.py) 的路径
-        # os.path.dirname(__file__) 是 src/ 目录
-        features_base_dir = os.path.join(os.path.dirname(__file__), 'chat', 'features')
-        if os.path.exists(features_base_dir):
-            for feature_name in os.listdir(features_base_dir):
-                feature_path = os.path.join(features_base_dir, feature_name)
-                if os.path.isdir(feature_path):
-                    cogs_path = os.path.join(feature_path, 'cogs')
-                    if os.path.exists(cogs_path):
-                        cog_module_paths.append(f'src.chat.features.{feature_name}.cogs')
+        # 动态查找所有 features/*/cogs 目录并添加到扫描列表
+        features_dir = src_root / 'chat' / 'features'
+        if features_dir.is_dir():
+            for feature in features_dir.iterdir():
+                if feature.is_dir():
+                    cogs_dir = feature / 'cogs'
+                    if cogs_dir.is_dir():
+                        cog_paths_to_scan.append(cogs_dir)
 
-        # 遍历并加载所有找到的 Cog 模块
-        for path in cog_module_paths:
-            # 将 Python 模块路径转换为文件系统路径
-            # 'src.guidance.cogs' -> ['guidance', 'cogs']
-            relative_path_parts = path.replace('src.', '').split('.')
-            # 'E:\Discord_bot\Odysseia-Guidance\src' + 'guidance' + 'cogs'
-            fs_path = os.path.join(os.path.dirname(__file__), *relative_path_parts)
-            
-            if not os.path.exists(fs_path):
-                log.warning(f"Cog 目录不存在: {fs_path}")
-                continue
+        # 遍历所有待扫描的目录，加载其中的 cog
+        for path in cog_paths_to_scan:
+            # 使用相对于项目根目录的路径进行日志记录，更清晰
+            log.info(f"--- 正在从 {path.relative_to(src_root.parent)} 加载 Cogs ---")
+            for file in path.glob('*.py'):
+                if file.name.startswith('__'):
+                    continue
 
-            log.info(f"--- 正在从 {path} 加载 Cogs ---")
-            for filename in os.listdir(fs_path):
-                if filename.endswith('.py') and not filename.startswith('__'):
-                    cog_name = f'{path}.{filename[:-3]}'
-                    try:
-                        await self.load_extension(cog_name)
-                        log.info(f"成功加载模块: {cog_name}")
-                    except Exception as e:
-                        log.error(f"加载模块 {cog_name} 失败: {e}", exc_info=True)
+                # 从文件系统路径构建 Python 模块路径
+                # 例如: E:\...\src\chat\...\feeding_cog.py -> src.chat....feeding_cog
+                relative_path = file.relative_to(src_root.parent)
+                module_name = str(relative_path.with_suffix('')).replace(os.path.sep, '.')
+                
+                try:
+                    await self.load_extension(module_name)
+                    log.info(f"成功加载模块: {module_name}")
+                except Exception as e:
+                    log.error(f"加载模块 {module_name} 失败: {e}", exc_info=True)
 
         log.info("--- 所有模块加载完毕 ---")
 
@@ -295,10 +293,10 @@ async def main():
     log = logging.getLogger(__name__)
 
     # --- webui心跳启动进程 --
-    log.info("启用webui心跳包")
-    sender_thread = threading.Thread(target=heartbeat_sender,daemon=True)
-    sender_thread.start()
-    log.info("Webui心跳包已启用")
+    # log.info("启用webui心跳包")
+    # sender_thread = threading.Thread(target=heartbeat_sender,daemon=True)
+    # sender_thread.start()
+    # log.info("Webui心跳包已启用")
 
     # 3. 异步初始化数据库
     log.info("正在异步初始化数据库...")

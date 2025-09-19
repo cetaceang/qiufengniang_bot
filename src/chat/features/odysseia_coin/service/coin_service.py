@@ -204,20 +204,20 @@ class CoinService:
         query = "SELECT * FROM shop_items WHERE item_id = ?"
         return await chat_db_manager._execute(chat_db_manager._db_transaction, query, (item_id,), fetch="one")
 
-    async def purchase_item(self, user_id: int, guild_id: int, item_id: int, quantity: int = 1) -> tuple[bool, str, Optional[int], bool]:
+    async def purchase_item(self, user_id: int, guild_id: int, item_id: int, quantity: int = 1) -> tuple[bool, str, Optional[int], bool, bool]:
         """
         处理用户购买商品的逻辑。
-        返回一个元组 (success: bool, message: str, new_balance: Optional[int], should_show_modal: bool)。
+        返回一个元组 (success: bool, message: str, new_balance: Optional[int], should_show_modal: bool, should_generate_gift_response: bool)。
         """
         item = await self.get_item_by_id(item_id)
         if not item:
-            return False, "找不到该商品。", None, False
+            return False, "找不到该商品。", None, False, False
 
         total_cost = item['price'] * quantity
         current_balance = await self.get_balance(user_id)
 
         if current_balance < total_cost:
-            return False, f"你的余额不足！需要 {total_cost} 类脑币，但你只有 {current_balance}。", None, False
+            return False, f"你的余额不足！需要 {total_cost} 类脑币，但你只有 {current_balance}。", None, False, False
 
         # 扣款并记录（仅当费用大于0时）
         new_balance = current_balance
@@ -225,7 +225,7 @@ class CoinService:
             reason = f"购买 {quantity}x {item['name']}"
             new_balance = await self.remove_coins(user_id, total_cost, reason)
             if new_balance is None:
-                return False, "购买失败，无法扣除类脑币。", None, False
+                return False, "购买失败，无法扣除类脑币。", None, False, False
 
         # 根据物品目标执行不同操作
         item_target = item['target']
@@ -233,22 +233,17 @@ class CoinService:
 
         if item_target == 'ai':
             # --- 送给类脑娘的物品 ---
-            
-            # 简单规则：好感度增加值为价格的10%，至少为1
             points_to_add = max(1, item['price'] // 10)
-            
             gift_success, gift_message = await affection_service.increase_affection_for_gift(user_id, guild_id, points_to_add)
-            
+
             if gift_success:
-                # 如果送礼成功，返回成功的消息
-                return True, f"你将 **{item['name']}** 送给了类脑娘，花费了 {total_cost} 类脑币。\n{gift_message}", new_balance, False
+                # 购买成功，返回空消息，并标记需要生成AI回应
+                return True, "", new_balance, False, True
             else:
-                # 如果送礼失败（例如今天已送过），则需要回滚金币交易
-                # 重新增加刚刚扣除的硬币
+                # 送礼失败，回滚交易
                 await self.add_coins(user_id, total_cost, f"送礼失败返还: {item['name']}")
                 log.warning(f"用户 {user_id} 送礼失败，已返还 {total_cost} 类脑币。原因: {gift_message}")
-                # 返回失败状态和从好感度服务获得的消息
-                return False, gift_message, current_balance, False
+                return False, gift_message, current_balance, False, False
 
         elif item_target == 'self' and item_effect:
             # --- 给自己用且有立即效果的物品 ---
@@ -291,7 +286,7 @@ class CoinService:
                 
                 await chat_db_manager._execute(_transaction)
                 
-                return True, f"你使用了 **{item['name']}**，花费了 {total_cost} 类脑币。在接下来的24小时内，你与类脑娘的对话冷却时间将大幅缩短！", new_balance, False
+                return True, f"你使用了 **{item['name']}**，花费了 {total_cost} 类脑币。在接下来的24小时内，你与类脑娘的对话冷却时间将大幅缩短！", new_balance, False, False
             elif item_effect == PERSONAL_MEMORY_ITEM_EFFECT_ID:
                 # 检查用户是否已经拥有个人记忆功能
                 user_profile = await chat_db_manager.get_user_profile(user_id)
@@ -300,26 +295,26 @@ class CoinService:
                 if has_personal_memory:
                     # 用户已经拥有该功能，扣除10个类脑币作为更新费用
                     # 用户已经拥有该功能，同样需要弹出模态框让他们编辑
-                    return True, f"你花费了 {total_cost} 类脑币来更新你的个人档案。", new_balance, True
+                    return True, f"你花费了 {total_cost} 类脑币来更新你的个人档案。", new_balance, True, False
                 else:
                     # 用户尚未拥有该功能，扣除500个类脑币并解锁功能
                     from src.chat.features.personal_memory.services.personal_memory_service import personal_memory_service
                     await personal_memory_service.unlock_feature(user_id)
-                    return True, f"你已成功解锁 **{item['name']}**！现在类脑娘将开始为你记录个人记忆。", new_balance, True
+                    return True, f"你已成功解锁 **{item['name']}**！现在类脑娘将开始为你记录个人记忆。", new_balance, True, False
             elif item_effect == WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID:
                 # 购买"知识纸条"商品，需要弹出模态窗口
-                return True, f"你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**。", new_balance, True
+                return True, f"你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**。", new_balance, True, False
             elif item_effect == COMMUNITY_MEMBER_UPLOAD_EFFECT_ID:
                 # 购买"社区成员档案上传"商品，需要弹出模态窗口
-                return True, f"你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**。", new_balance, True
+                return True, f"你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**。", new_balance, True, False
             else:
                 # 其他未知效果，暂时先放入背包
                 await self._add_item_to_inventory(user_id, item_id, quantity)
-                return True, f"购买成功！你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**，已放入你的背包。", new_balance, False
+                return True, f"购买成功！你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**，已放入你的背包。", new_balance, False, False
         else:
             # --- 普通物品，放入背包 ---
             await self._add_item_to_inventory(user_id, item_id, quantity)
-            return True, f"购买成功！你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**，已放入你的背包。", new_balance, False
+            return True, f"购买成功！你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**，已放入你的背包。", new_balance, False, False
 
     async def _add_item_to_inventory(self, user_id: int, item_id: int, quantity: int):
         """将物品添加到用户背包的内部方法"""

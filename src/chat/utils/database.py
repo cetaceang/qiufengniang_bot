@@ -126,6 +126,15 @@ class ChatDatabaseManager:
                 """)
                 log.info("已向 ai_affection 表添加 last_gift_date 列。")
 
+            # --- 投喂日志表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS feeding_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    timestamp TIMESTAMP NOT NULL
+                );
+            """)
+
             # --- 用户核心档案表 (User Profile) ---
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (

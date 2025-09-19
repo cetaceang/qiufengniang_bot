@@ -117,3 +117,5 @@ if __name__ == "__main__":
         clear_sqlite_tables()
     else:
         query_all_data()
+
+

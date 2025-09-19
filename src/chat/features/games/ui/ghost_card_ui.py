@@ -136,7 +136,7 @@ class GhostCardUI:
                 lose_text += f"\n\n你失去了 **{bet_amount}** 类脑币。"
             embed.description = lose_text
             embed.color = discord.Color.red()
-            embed.set_thumbnail(url=text_config.static_urls.ai_win_thumbnail)
+            embed.set_thumbnail(url=text_config.static_urls.AI_WIN_THUMBNAIL)
         
         return embed
      
