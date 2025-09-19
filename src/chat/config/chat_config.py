@@ -53,7 +53,7 @@ COOLDOWN_RATES = {
 }
 
 # (min, max) 分钟
-BLACKLIST_BAN_DURATION_MINUTES = (30, 60)
+BLACKLIST_BAN_DURATION_MINUTES = (3, 8)
 
 
 # --- 类脑币系统 ---
@@ -63,9 +63,9 @@ COIN_REWARD_FORUM_CHANNEL_IDS = _parse_ids("COIN_REWARD_FORUM_CHANNEL_IDS")
 # --- 好感度系统 ---
 AFFECTION_CONFIG = {
     "INCREASE_CHANCE": 0.5,       # 每次对话增加好感度的几率
-    "INCREASE_AMOUNT": 0.5,         # 每次增加的点数
-    "DAILY_CHAT_AFFECTION_CAP": 10, # 每日通过对话获取的好感度上限
-    "BLACKLIST_PENALTY": -10,    # 被AI拉黑时扣除的点数
+    "INCREASE_AMOUNT": 1,         # 每次增加的点数
+    "DAILY_CHAT_AFFECTION_CAP": 20, # 每日通过对话获取的好感度上限
+    "BLACKLIST_PENALTY": -5,    # 被AI拉黑时扣除的点数
     "DAILY_FLUCTUATION": (-5, 5)  # 每日好感度随机浮动的范围
 }
 
@@ -120,16 +120,16 @@ WORLD_BOOK_CONFIG = {
     # 审核系统设置
     "review_settings": {
         # 审核的持续时间（分钟）
-        "review_duration_minutes": 1,
+        "review_duration_minutes": 5,
 
         # 审核时间结束后，通过所需的最低赞成票数
-        "approval_threshold": 1,
+        "approval_threshold": 5,
 
         # 在审核期间，可立即通过的赞成票数
-        "instant_approval_threshold": 2,
+        "instant_approval_threshold": 10,
 
         # 在审核期间，可立即否决的反对票数
-        "rejection_threshold": 1,
+        "rejection_threshold": 3,
         
         # 投票使用的表情符号
         "vote_emoji": "✅",
@@ -139,7 +139,6 @@ WORLD_BOOK_CONFIG = {
 
 # --- 礼物功能提示词配置 ---
 GIFT_SYSTEM_PROMPT = """
-你是 Discord 聊天中的一个角色。你的角色由以下设定定义。
 {persona}
 """
 
@@ -149,7 +148,7 @@ GIFT_PROMPT = """
 礼物: {item_name}
 你与该用户当前的好感度等级是: {affection_level}。
 
-根据你的角色设定，写一段简短而有吸引力的回复来感谢用户送的礼物。
+根据你的角色设定，写一段3-6句且有吸引力的回复来感谢用户送的礼物。
 你的回复应该自然且符合角色设定。
 请直接输出回复内容，不要添加任何引导语。
 """
