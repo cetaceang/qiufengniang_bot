@@ -85,6 +85,8 @@ class MessageProcessor:
             Dict[str, Any]: 一个包含 'final_content' 和 'image_data_list' 的字典。
         """
         image_data_list = []
+        # 根据用户反馈，我们不考虑私聊场景，因此可以直接从 message.guild.me 获取机器人用户对象
+        bot_user = message.guild.me
 
         # 1. 处理当前消息的图片附件
         if message.attachments:
@@ -97,7 +99,7 @@ class MessageProcessor:
                 ref_msg = await message.channel.fetch_message(message.reference.message_id)
                 if ref_msg and ref_msg.author:
                     # 清理被回复消息的文本
-                    ref_content_cleaned = self._clean_message_content(ref_msg.content, ref_msg.mentions)
+                    ref_content_cleaned = self._clean_message_content(ref_msg.content, ref_msg.mentions, bot_user)
                     replied_message_content = f'[回复 @{ref_msg.author.display_name}: "{ref_content_cleaned}"] '
                     
                     # 提取被回复消息中的图片
@@ -113,8 +115,6 @@ class MessageProcessor:
         image_data_list.extend(emoji_images)
 
         # 4. 清理文本内容
-        # 根据用户反馈，我们不考虑私聊场景，因此可以直接从 message.guild.me 获取机器人用户对象
-        bot_user = message.guild.me
         clean_content = self._clean_message_content(content_with_placeholders, message.mentions, bot_user)
 
         # 5. 组合最终的文本内容
