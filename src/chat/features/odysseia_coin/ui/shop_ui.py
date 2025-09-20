@@ -223,8 +223,8 @@ class PurchaseButton(discord.ui.Button):
             # 5. 扣款成功后，保存个人档案
             components = modal_interaction.data.get('components', [])
             values_by_id = {
-                comp['components']['custom_id']: comp['components']['value']
-                for comp in components if comp.get('components')
+                comp['components'][0]['custom_id']: comp['components'][0]['value']
+                for comp in components if comp.get('components') and comp['components']
             }
             profile_data = {
                 'name': values_by_id.get('name', ''),
