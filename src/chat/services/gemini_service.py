@@ -21,6 +21,7 @@ from google.api_core import exceptions as google_exceptions
 from google.genai import errors as genai_errors
 
 # 导入数据库管理器和提示词配置
+from src import config
 from src.chat.utils.database import chat_db_manager
 from src.chat.config import chat_config as app_config
 from src.chat.config.emoji_config import EMOJI_MAPPINGS
@@ -96,8 +97,16 @@ class GeminiService:
 
     def _create_client_with_key(self, api_key: str):
         """使用给定的 API 密钥动态创建一个 Gemini 客户端实例。"""
-        # Clewdr 逻辑已移除，直接使用 API 密钥创建客户端
-        return genai.Client(api_key=api_key)
+        base_url = os.getenv('GEMINI_API_BASE_URL')
+        if base_url:
+            log.info(f"使用自定义 Gemini API 端点: {base_url}")
+            # 根据用户提供的文档，正确的方法是使用 types.HttpOptions
+            # Cloudflare Worker 需要 /gemini 后缀，所以我们不移除它
+            http_options = types.HttpOptions(base_url=base_url)
+            return genai.Client(api_key=api_key, http_options=http_options)
+        else:
+            log.info("使用默认 Gemini API 端点。")
+            return genai.Client(api_key=api_key)
 
     async def get_user_conversation_history(self, user_id: int, guild_id: int) -> List[Dict]:
         """从数据库获取用户的对话历史"""
