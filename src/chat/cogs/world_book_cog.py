@@ -14,6 +14,7 @@ from src import config
 from src.chat.config import chat_config
 from src.chat.features.world_book.services.incremental_rag_service import incremental_rag_service
 from src.chat.features.personal_memory.services.personal_memory_service import personal_memory_service
+from src.chat.features.odysseia_coin.service.coin_service import coin_service
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +81,12 @@ class WorldBookCog(commands.Cog):
         log.debug(f"检测到对审核消息 (ID: {message.id}) 的投票，解析出 pending_id: {pending_id}，投票者: {payload.member.display_name}")
         await self.process_vote(pending_id, message)
 
+    def _get_review_settings(self, entry_type: str) -> dict:
+        """根据条目类型获取对应的审核配置"""
+        if entry_type == 'personal_profile':
+            return chat_config.WORLD_BOOK_CONFIG.get('personal_profile_review_settings', REVIEW_SETTINGS)
+        return REVIEW_SETTINGS
+
     async def process_vote(self, pending_id: int, message: discord.Message):
         """处理投票逻辑，检查是否达到阈值"""
         log.debug(f"--- 开始处理投票 for pending_id: {pending_id} ---")
@@ -94,34 +101,29 @@ class WorldBookCog(commands.Cog):
 
             if not entry:
                 log.warning(f"在 process_vote 中找不到待审核的条目 #{pending_id} 或其状态不是 'pending'。")
-                # 额外检查：看看这个条目是否存在但状态不对
-                cursor.execute("SELECT status FROM pending_entries WHERE id = ?", (pending_id,))
-                wrong_status_entry = cursor.fetchone()
-                if wrong_status_entry:
-                    log.warning(f"条目 #{pending_id} 存在，但状态为: {wrong_status_entry['status']}")
                 return
 
-            # 获取当前票数
+            review_settings = self._get_review_settings(entry['entry_type'])
+
             approvals = 0
             rejections = 0
             for reaction in message.reactions:
-                if str(reaction.emoji) == VOTE_EMOJI:
+                if str(reaction.emoji) == review_settings['vote_emoji']:
                     approvals = reaction.count
-                elif str(reaction.emoji) == REJECT_EMOJI:
+                elif str(reaction.emoji) == review_settings['reject_emoji']:
                     rejections = reaction.count
             
-            instant_approval_threshold = REVIEW_SETTINGS['instant_approval_threshold']
-            log.info(f"审核ID #{pending_id}: 当前票数 ✅{approvals}, ❌{rejections}。快速通过阈值: {instant_approval_threshold}")
+            instant_approval_threshold = review_settings['instant_approval_threshold']
+            log.info(f"审核ID #{pending_id} (类型: {entry['entry_type']}): 当前票数 ✅{approvals}, ❌{rejections}。快速通过阈值: {instant_approval_threshold}")
 
-            # 检查是否满足条件
             if approvals >= instant_approval_threshold:
-                log.info(f"审核ID #{pending_id} 达到快速通过阈值 ({approvals} >= {instant_approval_threshold})。准备批准...")
+                log.info(f"审核ID #{pending_id} 达到快速通过阈值。准备批准...")
                 await self.approve_entry(pending_id, entry, message, conn)
-            elif rejections >= REVIEW_SETTINGS['rejection_threshold']:
+            elif rejections >= review_settings['rejection_threshold']:
                 log.info(f"审核ID #{pending_id} 达到否决阈值。")
-                await self.reject_entry(pending_id, message, conn, "社区投票否决")
+                await self.reject_entry(pending_id, entry, message, conn, "社区投票否决")
             else:
-                log.info(f"审核ID #{pending_id} 票数 ({approvals}) 未达到任何阈值，等待更多投票或过期。")
+                log.info(f"审核ID #{pending_id} 票数未达到任何阈值，等待更多投票或过期。")
 
         except Exception as e:
             log.error(f"处理投票时发生错误 (ID: {pending_id}): {e}", exc_info=True)
@@ -144,20 +146,14 @@ class WorldBookCog(commands.Cog):
                 content_json = json.dumps(data, ensure_ascii=False)
 
                 if update_target_id:
-                    # --- 这是更新逻辑 ---
                     cursor.execute(
-                        """
-                        UPDATE community_members
-                        SET title = ?, discord_number_id = ?, content_json = ?
-                        WHERE id = ?
-                        """,
+                        "UPDATE community_members SET title = ?, discord_number_id = ?, content_json = ? WHERE id = ?",
                         (f"社区成员档案 - {data['name']}", data.get('discord_id'), content_json, update_target_id)
                     )
-                    new_entry_id = update_target_id # RAG处理时使用旧ID
-                    log.info(f"已将审核通过的更新请求 #{pending_id} 应用到现有社区成员档案 {update_target_id}。")
+                    new_entry_id = update_target_id
+                    log.info(f"已更新社区成员档案 {update_target_id} (源自审核 #{pending_id})。")
                     embed_title = "✅ 社区成员档案已更新"
                 else:
-                    # --- 这是创建逻辑 ---
                     import time
                     clean_name = re.sub(r'[^\w\u4e00-\u9fff]', '_', data['name'])[:50]
                     member_id = f"community_{clean_name}_{int(time.time())}"
@@ -166,30 +162,30 @@ class WorldBookCog(commands.Cog):
                         (member_id, f"社区成员档案 - {data['name']}", data.get('discord_id'), content_json, 'approved')
                     )
                     new_entry_id = member_id
-                    log.info(f"已将审核通过的社区成员档案 #{pending_id} 存入主表，新ID: {new_entry_id}")
+                    log.info(f"已创建新社区成员档案 {new_entry_id} (源自审核 #{pending_id})。")
                     embed_title = "✅ 社区成员档案已入库"
 
-                # --- 新增逻辑：将会员档案绑定到个人记忆 ---
                 if data.get('discord_id'):
-                    try:
-                        target_user_id = int(data['discord_id'])
-                        profile_data = {
-                            'name': data.get('name'),
-                            'personality': data.get('personality'),
-                            'background': data.get('background'),
-                            'preferences': data.get('preferences')
-                        }
-                        # 使用 asyncio.create_task 在后台执行绑定和解锁操作
-                        asyncio.create_task(personal_memory_service.save_user_profile(target_user_id, profile_data))
-                        asyncio.create_task(personal_memory_service.unlock_feature(target_user_id))
-                        log.info(f"已为用户 {target_user_id} 创建/更新个人档案并解锁功能（源自社区成员档案 #{pending_id}）。")
-                    except (ValueError, TypeError) as e:
-                        log.error(f"处理社区成员档案 #{pending_id} 的 discord_id 时出错: {e}", exc_info=True)
-                    except Exception as e:
-                        log.error(f"将会员档案绑定到个人记忆时发生未知错误: {e}", exc_info=True)
-                # --- 新增逻辑结束 ---
+                    target_user_id = int(data['discord_id'])
+                    profile_data = {k: data[k] for k in ['name', 'personality', 'background', 'preferences'] if k in data}
+                    asyncio.create_task(personal_memory_service.save_user_profile(target_user_id, profile_data))
+                    asyncio.create_task(personal_memory_service.unlock_feature(target_user_id))
+                    log.info(f"已为用户 {target_user_id} 绑定/更新个人档案并解锁功能。")
+
+            elif entry_type == 'personal_profile':
+                target_user_id = int(data['discord_id'])
+                profile_data = {k: data[k] for k in ['name', 'personality', 'background', 'preferences'] if k in data}
+                
+                await personal_memory_service.save_user_profile(target_user_id, profile_data)
+                await personal_memory_service.unlock_feature(target_user_id)
+                
+                new_entry_id = f"personal_profile_{target_user_id}" # 构造一个唯一的标识符
+                log.info(f"已将审核通过的个人档案 #{pending_id} 存入用户 {target_user_id} 的个人记忆中。")
+                embed_title = "✅ 个人档案已激活"
+                embed_description = f"感谢社区的审核！**{entry_name}** 的个人档案已成功激活。"
 
             elif entry_type == 'general_knowledge':
+                # ... (通用知识逻辑保持不变)
                 import time
                 category_name = data['category_name']
                 cursor.execute("SELECT id FROM categories WHERE name = ?", (category_name,))
@@ -199,19 +195,18 @@ class WorldBookCog(commands.Cog):
                 else:
                     cursor.execute("INSERT INTO categories (name) VALUES (?)", (category_name,))
                     category_id = cursor.lastrowid
-                    log.info(f"为审核通过的条目创建了新类别: {category_name} (ID: {category_id})")
                 
                 content_dict = {"description": data['content_text']}
                 content_json = json.dumps(content_dict, ensure_ascii=False)
                 clean_title = re.sub(r'[^\w\u4e00-\u9fff]', '_', data['title'])[:50]
                 entry_id = f"{clean_title}_{int(time.time())}"
                 
-                cursor.execute("""
-                    INSERT INTO general_knowledge (id, title, name, content_json, category_id, contributor_id, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-                """, (entry_id, data['title'], data['name'], content_json, category_id, data.get('contributor_id'), 'approved'))
+                cursor.execute(
+                    "INSERT INTO general_knowledge (id, title, name, content_json, category_id, contributor_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+                    (entry_id, data['title'], data['name'], content_json, category_id, data.get('contributor_id'), 'approved')
+                )
                 new_entry_id = entry_id
-                log.info(f"已将审核通过的通用知识 #{pending_id} 存入主表，新ID: {new_entry_id}")
+                log.info(f"已创建通用知识条目 {new_entry_id} (源自审核 #{pending_id})。")
                 embed_title = "✅ 世界之书知识已入库"
                 embed_description = f"感谢社区的审核！标题为 **{data['title']}** 的贡献已成功添加到世界之书中。"
 
@@ -220,24 +215,21 @@ class WorldBookCog(commands.Cog):
                 conn.commit()
                 log.info(f"审核条目 #{pending_id} 状态已更新为 'approved'。")
 
-                # 异步触发RAG处理
-                if entry_type == 'general_knowledge':
-                    asyncio.create_task(incremental_rag_service.process_general_knowledge(new_entry_id))
-                elif entry_type == 'community_member':
-                    update_target_id = data.get('update_target_id')
-                    if update_target_id:
-                        # 更新流程：先删除旧向量，再创建新向量
-                        log.info(f"开始为更新的社区成员 {update_target_id} 同步向量...")
-                        asyncio.create_task(incremental_rag_service.delete_entry(update_target_id))
-                        asyncio.create_task(incremental_rag_service.process_community_member(update_target_id))
-                        log.info(f"社区成员 {update_target_id} 的向量同步任务已启动。")
-                    else:
-                        # 创建流程
-                        log.info(f"开始为新社区成员 {new_entry_id} 创建向量...")
-                        asyncio.create_task(incremental_rag_service.process_community_member(new_entry_id))
-                        log.info(f"新社区成员 {new_entry_id} 的向量创建任务已启动。")
+                if entry_type in ['general_knowledge', 'community_member']:
+                    is_update = entry_type == 'community_member' and data.get('update_target_id')
+                    rag_id = data['update_target_id'] if is_update else new_entry_id
+                    
+                    if is_update:
+                        log.info(f"为更新的条目 {rag_id} 同步向量...")
+                        asyncio.create_task(incremental_rag_service.delete_entry(rag_id))
+                        asyncio.create_task(incremental_rag_service.process_community_member(rag_id))
+                    elif entry_type == 'community_member':
+                        log.info(f"为新社区成员 {rag_id} 创建向量...")
+                        asyncio.create_task(incremental_rag_service.process_community_member(rag_id))
+                    elif entry_type == 'general_knowledge':
+                        log.info(f"为新通用知识 {rag_id} 创建向量...")
+                        asyncio.create_task(incremental_rag_service.process_general_knowledge(rag_id))
 
-                # 更新原始消息
                 original_embed = message.embeds[0]
                 new_embed = original_embed.copy()
                 new_embed.title = embed_title
@@ -253,33 +245,79 @@ class WorldBookCog(commands.Cog):
             log.error(f"批准条目 #{pending_id} 时出错: {e}", exc_info=True)
             conn.rollback()
 
-    async def reject_entry(self, pending_id: int, message: discord.Message, conn: sqlite3.Connection, reason: str):
+    async def _handle_refund(self, entry: sqlite3.Row):
+        """处理审核失败的退款逻辑"""
+        try:
+            data = json.loads(entry['data_json'])
+            purchase_info = data.get('purchase_info')
+
+            if not purchase_info:
+                log.debug(f"条目 #{entry['id']} 没有购买信息，无需退款。")
+                return
+
+            user_id = entry['proposer_id']
+            price = purchase_info.get('price')
+            item_id = purchase_info.get('item_id')
+
+            if user_id and price is not None:
+                await coin_service.add_coins(
+                    user_id=user_id,
+                    amount=price,
+                    reason=f"审核未通过自动退款 (审核ID: {entry['id']}, item_id: {item_id})"
+                )
+                log.info(f"已为用户 {user_id} 成功退款 {price} 类脑币。")
+
+                # 尝试私信通知用户
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                    embed = discord.Embed(
+                        title="【审核结果通知】",
+                        description=f"抱歉，您提交的 **{data.get('name', '未知档案')}** 未能通过社区审核。",
+                        color=discord.Color.red()
+                    )
+                    embed.add_field(name="退款通知", value=f"您购买时支付的 **{price}** 类脑币已自动退还到您的账户。")
+                    embed.set_footer(text="感谢您的参与！")
+                    await user.send(embed=embed)
+                    log.info(f"已向用户 {user_id} 发送退款通知。")
+                except discord.Forbidden:
+                    log.warning(f"无法向用户 {user_id} 发送私信（可能已关闭私信）。")
+                except Exception as e:
+                    log.error(f"向用户 {user_id} 发送退款通知时出错: {e}", exc_info=True)
+
+        except Exception as e:
+            log.error(f"处理退款逻辑时发生严重错误 (审核ID: {entry['id']}): {e}", exc_info=True)
+
+    async def reject_entry(self, pending_id: int, entry: sqlite3.Row, message: discord.Message, conn: sqlite3.Connection, reason: str):
         """否决条目并更新状态"""
         try:
+            data = json.loads(entry['data_json'])
             cursor = conn.cursor()
             cursor.execute("UPDATE pending_entries SET status = 'rejected' WHERE id = ?", (pending_id,))
             conn.commit()
 
             # 更新原始消息
-            original_embed = message.embeds[0]
-            data_name = original_embed.fields[0].value if original_embed.fields else "未知贡献"
-            
-            new_embed = original_embed.copy()
-            # 使标题更通用
-            if "社区成员" in original_embed.title:
-                new_embed.title = "❌ 社区成员档案"
-                new_embed.description = f"**{data_name}** 的档案提交未通过审核。\n**原因:** {reason}"
-            else:
-                new_embed.title = "❌ 世界之书贡献"
-                new_embed.description = f"标题为 **{data_name}** 的贡献提交未通过审核。\n**原因:** {reason}"
+            if message and message.embeds:
+                original_embed = message.embeds[0]
+                data_name = original_embed.fields[0].value if original_embed.fields else "未知贡献"
+                
+                new_embed = original_embed.copy()
+                # 使标题更通用
+                if "档案" in original_embed.title:
+                    new_embed.title = f"❌ {data.get('name', '未知')} 的档案"
+                    new_embed.description = f"提交未通过审核。\n**原因:** {reason}"
+                else:
+                    new_embed.title = "❌ 世界之书贡献"
+                    new_embed.description = f"标题为 **{data_name}** 的贡献提交未通过审核。\n**原因:** {reason}"
 
-            new_embed.color = discord.Color.red()
-            
-            # message 可能为 None (例如处理消息丢失的过期条目时)
-            if message:
+                new_embed.color = discord.Color.red()
+                
                 await message.edit(embed=new_embed)
                 await message.clear_reactions()
+            
             log.info(f"审核ID #{pending_id} 已被否决，原因: {reason}")
+
+            # --- 处理退款 ---
+            await self._handle_refund(entry)
 
         except Exception as e:
             log.error(f"否决条目 #{pending_id} 时出错: {e}", exc_info=True)
@@ -326,18 +364,19 @@ class WorldBookCog(commands.Cog):
                                     approvals += 1
                             break
                     
-                    log.info(f"过期审核ID #{entry['id']}: 最终真实用户票数 ✅{approvals}")
+                    review_settings = self._get_review_settings(entry['entry_type'])
+                    log.info(f"过期审核ID #{entry['id']} (类型: {entry['entry_type']}): 最终真实用户票数 ✅{approvals}。通过阈值: {review_settings['approval_threshold']}")
 
-                    if approvals >= REVIEW_SETTINGS['approval_threshold']:
+                    if approvals >= review_settings['approval_threshold']:
                         log.info(f"过期审核ID #{entry['id']} 满足通过条件。")
                         await self.approve_entry(entry['id'], entry, message, conn)
                     else:
                         log.info(f"过期审核ID #{entry['id']} 未满足通过条件。")
-                        await self.reject_entry(entry['id'], message, conn, "审核时间结束，票数不足")
+                        await self.reject_entry(entry['id'], entry, message, conn, "审核时间结束，票数不足")
 
                 except discord.NotFound:
                     log.warning(f"找不到审核消息 {entry['message_id']}，将直接否决条目 #{entry['id']}")
-                    await self.reject_entry(entry['id'], None, conn, "审核消息丢失")
+                    await self.reject_entry(entry['id'], entry, None, conn, "审核消息丢失")
                 except Exception as e:
                     log.error(f"处理过期条目 #{entry['id']} 时发生错误: {e}", exc_info=True)
 

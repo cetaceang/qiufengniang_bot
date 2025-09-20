@@ -30,8 +30,9 @@ AVAILABLE_CATEGORIES = [
 class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
     """用于用户提交世界书知识条目的模态窗口"""
     
-    def __init__(self):
+    def __init__(self, purchase_info: Dict[str, Any] = None):
         super().__init__()
+        self.purchase_info = purchase_info
         
         self.category_input = discord.ui.TextInput(
             label="类别",
@@ -128,6 +129,27 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
 
     async def on_submit(self, interaction: discord.Interaction):
         """当用户提交模态窗口时调用"""
+        # --- 如果是通过商店购买，先处理扣款 ---
+        if self.purchase_info:
+            await interaction.response.defer(ephemeral=True) # 延迟响应以处理扣款
+            from src.chat.features.odysseia_coin.service.coin_service import coin_service
+            
+            price = self.purchase_info.get('price', 0)
+            item_id = self.purchase_info.get('item_id')
+
+            # 只有在价格大于0时才执行扣款
+            if price > 0:
+                new_balance = await coin_service.remove_coins(
+                    user_id=interaction.user.id,
+                    amount=price,
+                    reason=f"购买知识纸条 (item_id: {item_id})"
+                )
+                
+                if new_balance is None:
+                    await interaction.followup.send("抱歉，你的余额似乎不足，购买失败。", ephemeral=True)
+                    return
+        # --- 扣款逻辑结束 ---
+
         category = self.category_input.value.strip()
         title = self.title_input.value.strip()
         content = self.content_input.value.strip()
@@ -158,10 +180,22 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         pending_id = await self.create_pending_entry(interaction, knowledge_data)
 
         if not pending_id:
-            await interaction.response.send_message("提交审核时发生错误，请稍后再试。", ephemeral=True)
+            # 如果扣款了但提交失败，需要退款
+            if self.purchase_info:
+                from src.chat.features.odysseia_coin.service.coin_service import coin_service
+                await coin_service.add_coins(
+                    user_id=interaction.user.id,
+                    amount=self.purchase_info.get('price', 0),
+                    reason=f"知识纸条提交失败自动退款 (item_id: {self.purchase_info.get('item_id')})"
+                )
+                await interaction.followup.send("提交审核时发生错误，已自动退款，请稍后再试。", ephemeral=True)
+            else:
+                await interaction.response.send_message("提交审核时发生错误，请稍后再试。", ephemeral=True)
             return
 
-        await interaction.response.send_message(
+        # 根据是否有购买信息，选择不同的响应方式
+        response_method = interaction.followup.send if self.purchase_info else interaction.response.send_message
+        await response_method(
             f"✅ 您的知识贡献 **{title}** 已成功提交审核！\n请关注频道内的公开投票。",
             ephemeral=True
         )
@@ -173,9 +207,9 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         rejection_threshold = review_settings['rejection_threshold']
 
         embed = discord.Embed(
-            title="新的世界之书贡献",
+            title="我收到了一张小纸条！",
             description=(
-                f"**{interaction.user.display_name}** 提交了一份新的知识条目，需要社区进行审核。\n\n"
+                f"**{interaction.user.display_name}** 递给我一张纸条，上面写着关于 **{title}** 的知识，大家觉得内容怎么样？\n\n"
                 f"*审核将在{duration}分钟后自动结束。*"
             ),
             color=discord.Color.orange()
@@ -201,6 +235,14 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         review_message = await interaction.followup.send(embed=embed, wait=True)
 
         await self.update_message_id_for_pending_entry(pending_id, review_message.id)
+
+        # 如果是通过商店购买，更新商店视图的余额
+        if self.purchase_info:
+            from src.chat.features.odysseia_coin.service.coin_service import coin_service
+            new_balance = await coin_service.get_balance(interaction.user.id)
+            # 注意：这里无法直接更新原始的商店 view 对象，这是一个待优化的点。
+            # 简单的做法是提示用户手动刷新。
+            await interaction.followup.send("你的知识已提交审核，商店余额已更新。你可能需要重新打开商店或点击刷新按钮查看最新余额。", ephemeral=True)
 
     async def developer_direct_add(self, interaction: discord.Interaction, category_name: str, title: str, content_text: str):
         """开发者直接添加知识条目，无需审核"""

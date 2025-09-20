@@ -321,7 +321,7 @@ class GeminiService:
                     # 即使序列化失败，也记录基本信息
                     log.warning(f"用户 {user_id} 的请求被安全策略阻止，原因: {response.prompt_feedback.block_reason} (详细内容记录失败)")
 
-                return "抱歉，你的消息似乎触发了安全限制，我无法回复。请换个说法试试？"
+                return "呜啊! 这个太色情啦,我不看我不看"
             
             else:
                 log.warning(f"未能为用户 {user_id} 生成有效回复。")
