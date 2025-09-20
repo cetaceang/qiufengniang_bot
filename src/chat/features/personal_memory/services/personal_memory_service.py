@@ -4,6 +4,7 @@ import json
 import sqlite3
 import os
 from typing import Dict
+from datetime import datetime, timezone
 
 from src.chat.utils.database import chat_db_manager
 from src.chat.config.chat_config import PERSONAL_MEMORY_CONFIG, PROMPT_CONFIG, SUMMARY_MODEL
@@ -20,6 +21,8 @@ class PersonalMemoryService:
     def __init__(self):
         self.db_manager = chat_db_manager
         self.world_book_db_path = os.path.join(config.DATA_DIR, 'world_book.sqlite3')
+        # 用于追踪需要监听反应的投票消息 ID 及其发起时间
+        self.approval_message_ids: Dict[int, datetime] = {}
 
     def _get_world_book_connection(self):
         """获取世界书数据库的连接"""
@@ -53,7 +56,10 @@ class PersonalMemoryService:
         try:
             message = await channel.send(embed=embed)
             await message.add_reaction(approval_emoji)
-            log.info(f"已在频道 {channel.id} 为用户 {user.id} 发起个人记忆功能激活投票。")
+            # 将消息ID和当前时间戳添加到追踪字典中
+            now = datetime.now(timezone.utc)
+            self.approval_message_ids[message.id] = now
+            log.info(f"已在频道 {channel.id} 为用户 {user.id} 发起个人记忆功能激活投票，消息ID: {message.id} 已添加至监听列表，时间: {now}。")
         except discord.Forbidden:
             log.error(f"机器人没有权限在频道 {channel.name} (ID: {channel.id}) 中发送消息或添加反应。")
         except Exception as e:
