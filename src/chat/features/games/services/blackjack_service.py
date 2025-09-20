@@ -1,97 +1,132 @@
-import random
-import asyncio
-from typing import List, Dict, Union
+# -*- coding: utf-8 -*-
 
-# 定义牌的点数
-CARD_VALUES = {
-    'A': 11, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 10, 'Q': 10, 'K': 10
-}
-# 定义牌的种类
-SUITS = ['♠', '♥', '♦', '♣']
-# 定义所有牌
-DECKS = [f'{suit}{rank}' for suit in SUITS for rank, value in CARD_VALUES.items()]
+import logging
+from typing import Dict, List, Tuple, Optional
+from enum import Enum
+
+from .card import Deck, Card
+
+log = logging.getLogger(__name__)
+
+class GameStatus(Enum):
+    """游戏状态枚举"""
+    IN_PROGRESS = "进行中"
+    PLAYER_WINS = "玩家胜利"
+    DEALER_WINS = "庄家胜利"
+    PUSH = "平局"
+    PLAYER_BLACKJACK = "玩家黑杰克"
 
 class BlackjackService:
-    def __init__(self, bot, user_id, bet_amount):
-        self.bot = bot
-        self.user_id = user_id
-        self.bet_amount = bet_amount
-        self.deck = random.sample(DECKS, len(DECKS))
-        self.player_hand = []
-        self.dealer_hand = []
-        self.game_over = False
+    """21点游戏服务类"""
 
-    def deal_card(self, hand: List[str]) -> None:
-        """发一张牌到指定手牌"""
-        card = self.deck.pop()
-        hand.append(card)
+    def __init__(self):
+        self.active_games: Dict[str, Dict] = {}  # game_id -> game_state
 
-    def calculate_hand_value(self, hand: List[str]) -> int:
-        """计算手牌的点数"""
+    def _calculate_hand_value(self, hand: List[Card]) -> int:
+        """计算手牌点数，智能处理A的点数"""
         value = 0
         aces = 0
         for card in hand:
-            rank = card[1:]
-            value += CARD_VALUES[rank]
-            if rank == 'A':
+            value += card.value
+            if card.rank == 'A':
                 aces += 1
-        while value > 21 and aces:
+        
+        # 如果总点数超过21，且手牌中有A，则将A的点数从11变为1
+        while value > 21 and aces > 0:
             value -= 10
             aces -= 1
+            
         return value
 
-    def start_game(self):
-        """开始游戏，给玩家和庄家各发两张牌"""
-        self.deal_card(self.player_hand)
-        self.deal_card(self.dealer_hand)
-        self.deal_card(self.player_hand)
-        self.deal_card(self.dealer_hand)
-
-    def player_hit(self):
-        """玩家要牌"""
-        self.deal_card(self.player_hand)
-        if self.calculate_hand_value(self.player_hand) > 21:
-            self.game_over = True
-
-    async def dealer_turn(self):
-        """庄家回合"""
-        while self.calculate_hand_value(self.dealer_hand) < 17:
-            await asyncio.sleep(1)
-            self.deal_card(self.dealer_hand)
-        self.game_over = True
-
-    def get_game_state(self, show_dealer_card: bool = False) -> Dict[str, Union[List[str], int, str]]:
-        """获取当前游戏状态"""
-        player_value = self.calculate_hand_value(self.player_hand)
-        dealer_value = self.calculate_hand_value(self.dealer_hand)
+    def start_game(self, user_id: int, guild_id: int, bet_amount: int) -> str:
+        """开始一局新的21点游戏"""
+        game_id = f"blackjack_{user_id}_{guild_id}"
+        deck = Deck()
         
-        if show_dealer_card:
-            dealer_hand_display = self.dealer_hand
-            dealer_value_display = dealer_value
-        else:
-            dealer_hand_display = [self.dealer_hand[0], '??']
-            dealer_value_display = self.calculate_hand_value([self.dealer_hand[0]])
+        player_hand = [deck.deal(), deck.deal()]
+        dealer_hand = [deck.deal(), deck.deal()]
 
-        return {
-            "player_hand": self.player_hand,
-            "player_value": player_value,
-            "dealer_hand": dealer_hand_display,
-            "dealer_value": dealer_value_display,
-            "game_over": self.game_over,
-            "result": self.get_result() if self.game_over else None
+        player_score = self._calculate_hand_value(player_hand)
+        dealer_score = self._calculate_hand_value(dealer_hand)
+
+        status = GameStatus.IN_PROGRESS
+        winnings = 0
+
+        # 开局即黑杰克
+        if player_score == 21:
+            if dealer_score == 21:
+                status = GameStatus.PUSH
+            else:
+                status = GameStatus.PLAYER_BLACKJACK
+                winnings = int(bet_amount * 1.5) # 黑杰克赔率1.5
+        
+        self.active_games[game_id] = {
+            "deck": deck,
+            "player_hand": player_hand,
+            "dealer_hand": dealer_hand,
+            "player_score": player_score,
+            "dealer_score": dealer_score,
+            "bet_amount": bet_amount,
+            "status": status,
+            "winnings": winnings,
         }
+        
+        return game_id
 
-    def get_result(self) -> str:
-        """判断游戏结果"""
-        player_value = self.calculate_hand_value(self.player_hand)
-        dealer_value = self.calculate_hand_value(self.dealer_hand)
+    def get_game_state(self, game_id: str) -> Optional[Dict]:
+        """获取游戏状态"""
+        return self.active_games.get(game_id)
 
-        if player_value > 21:
-            return "player_bust"
-        if dealer_value > 21:
-            return "dealer_bust"
-        if player_value > dealer_value:
-            return "player_win"
-        if dealer_value > player_value:
-            return "dealer_win"
-        return "push"
+    def player_hit(self, game_id: str) -> Optional[Dict]:
+        """玩家要牌"""
+        game = self.get_game_state(game_id)
+        if not game or game["status"] != GameStatus.IN_PROGRESS:
+            return None
+
+        game["player_hand"].append(game["deck"].deal())
+        game["player_score"] = self._calculate_hand_value(game["player_hand"])
+
+        if game["player_score"] > 21:
+            game["status"] = GameStatus.DEALER_WINS
+            game["winnings"] = -game["bet_amount"]
+        
+        return game
+
+    def player_stand(self, game_id: str) -> Optional[Dict]:
+        """玩家停牌，轮到庄家行动"""
+        game = self.get_game_state(game_id)
+        if not game or game["status"] != GameStatus.IN_PROGRESS:
+            return None
+        
+        return self._dealer_turn(game)
+
+    def _dealer_turn(self, game: Dict) -> Dict:
+        """庄家行动逻辑"""
+        # 庄家在点数小于17时必须叫牌
+        while self._calculate_hand_value(game["dealer_hand"]) < 17:
+            game["dealer_hand"].append(game["deck"].deal())
+        
+        game["dealer_score"] = self._calculate_hand_value(game["dealer_hand"])
+        player_score = game["player_score"]
+        dealer_score = game["dealer_score"]
+        bet_amount = game["bet_amount"]
+
+        if dealer_score > 21 or player_score > dealer_score:
+            game["status"] = GameStatus.PLAYER_WINS
+            game["winnings"] = bet_amount
+        elif dealer_score > player_score:
+            game["status"] = GameStatus.DEALER_WINS
+            game["winnings"] = -bet_amount
+        else:
+            game["status"] = GameStatus.PUSH
+            game["winnings"] = 0
+            
+        return game
+
+    def end_game(self, game_id: str):
+        """结束游戏并清理"""
+        if game_id in self.active_games:
+            del self.active_games[game_id]
+
+# 全局实例
+blackjack_service = BlackjackService()

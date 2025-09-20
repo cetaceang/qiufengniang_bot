@@ -151,6 +151,14 @@ class CommunityMemberUploadModal(discord.ui.Modal, title="上传社区成员档�
         background = self.background_input.value.strip()
         preferences = self.preferences_input.value.strip()
         
+        # --- 新增：校验 Discord ID 是否为纯数字 ---
+        if discord_id and not discord_id.isdigit():
+            await interaction.response.send_message(
+                "❌ Discord ID 必须为纯数字，请重新提交。",
+                ephemeral=True
+            )
+            return
+        
         if not member_name or not personality:
             await interaction.response.send_message("成员名称和性格特点不能为空。", ephemeral=True)
             return
