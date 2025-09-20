@@ -27,7 +27,7 @@ GEMINI_CHAT_CONFIG = {
     "temperature": 1.1,
     "top_p": 0.97,
     "top_k": 50,
-    "max_output_tokens": 900,
+    "max_output_tokens": 3000,
     "thinking_budget": 500,  # 思考预算
 }
 
