@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 from src.guidance.utils.database import guidance_db_manager as db_manager
 from src.guidance.ui.views.ui_elements import BackButton
 from src.guidance.ui.views.channel_panel import PermanentPanelView # 这是我们要部署的用户端视图
-from src import config
+from src import config as root_config
 from src.guidance.utils.helpers import create_embed_from_template_data
 import json
 
@@ -66,11 +66,11 @@ class DeploymentView(View):
             description = "所有前置检查均已通过。\n" \
                         "▶️ **一键部署**: 向所有已配置的地点部署或更新引导消息。\n" \
                         "🔄 **重置部署**: 从所有地点删除已部署的引导消息。"
-            color = config.EMBED_COLOR_PRIMARY
+            color = root_config.EMBED_COLOR_PRIMARY
         else:
             title = "⚠️ 部署前检查失败"
             description = "部分条件不满足，无法进行部署。请根据以下提示完成配置后重试。"
-            color = config.EMBED_COLOR_PRIMARY
+            color = root_config.EMBED_COLOR_PRIMARY
 
         embed = discord.Embed(title=title, description=description, color=color)
 
@@ -147,7 +147,7 @@ class DeployAllButton(Button):
         report_embed = discord.Embed(
             title="部署完成",
             description=f"**总览: {success_count} 个成功, {fail_count} 个失败**",
-            color=config.EMBED_COLOR_PRIMARY
+            color=root_config.EMBED_COLOR_PRIMARY
         )
         
         current_chunk = ""
@@ -222,7 +222,7 @@ class ResetDeploymentButton(Button):
         report_embed = discord.Embed(
             title="重置完成",
             description=f"**总览: {success_count} 个成功, {fail_count} 个失败/警告**",
-            color=config.EMBED_COLOR_PRIMARY
+            color=root_config.EMBED_COLOR_PRIMARY
         )
         
         current_chunk = ""

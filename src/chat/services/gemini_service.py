@@ -302,7 +302,25 @@ class GeminiService:
                 return formatted_response
             
             elif response.prompt_feedback and response.prompt_feedback.block_reason:
-                log.warning(f"用户 {user_id} 的请求被安全策略阻止，原因: {response.prompt_feedback.block_reason}")
+                # --- 增强日志记录 ---
+                try:
+                    # 尝试序列化整个对话历史和响应以进行调试
+                    conversation_for_log = json.dumps(
+                        GeminiService._serialize_for_logging(final_conversation),
+                        ensure_ascii=False,
+                        indent=2
+                    )
+                    full_response_for_log = str(response)
+                    log.warning(
+                        f"用户 {user_id} 的请求被安全策略阻止，原因: {response.prompt_feedback.block_reason}\n"
+                        f"--- 完整的对话历史 ---\n{conversation_for_log}\n"
+                        f"--- 完整的 API 响应 ---\n{full_response_for_log}"
+                    )
+                except Exception as log_e:
+                    log.error(f"序列化被阻止的请求用于日志记录时出错: {log_e}")
+                    # 即使序列化失败，也记录基本信息
+                    log.warning(f"用户 {user_id} 的请求被安全策略阻止，原因: {response.prompt_feedback.block_reason} (详细内容记录失败)")
+
                 return "抱歉，你的消息似乎触发了安全限制，我无法回复。请换个说法试试？"
             
             else:

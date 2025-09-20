@@ -7,7 +7,7 @@ import uuid
 
 from src.guidance.utils.database import guidance_db_manager as db_manager
 from src.guidance.ui.modals.temporary_message_modal import TemporaryMessageModal
-from src import config
+from src import config as root_config
 
 class TemporaryMessagesEditView(View):
     """
@@ -58,7 +58,7 @@ class TemporaryMessagesEditView(View):
         embed = discord.Embed(
             title=f"正在编辑 #{channel_name} 的临时消息",
             description="在这里管理当用户点击“了解详情”后，按顺序显示的临时消息。",
-            color=config.EMBED_COLOR_INFO
+            color=root_config.EMBED_COLOR_INFO
         )
 
         if not self.messages:

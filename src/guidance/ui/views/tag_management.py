@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 
 import discord
+from typing import Optional
 from discord.ui import View, Button, button
 import logging
 
 from src.guidance.utils.database import guidance_db_manager as db_manager
 from src.guidance.ui.modals.tag_modal import TagModal
 from src.guidance.ui.views.ui_elements import BackButton
-from src import config
+from src import config as root_config
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class TagManagementView(View):
         embed = discord.Embed(
             title="🏷️ 标签管理",
             description="在这里管理用于分类引导路径的标签。\n点击下方按钮新增标签，或点击已有标签进行编辑/删除。",
-            color=config.EMBED_COLOR_INFO
+            color=root_config.EMBED_COLOR_INFO
         )
         if not self.tags:
             embed.add_field(name="暂无标签", value="点击“新增标签”来创建第一个标签吧！")
@@ -224,7 +225,7 @@ class TagButton(Button):
         embed = discord.Embed(
             title=f"管理标签: {self.tag['tag_name']}",
             description=f"你正在管理标签 **{self.tag['tag_name']}**。\n> {self.tag['description'] or '*无描述*'}",
-            color=config.EMBED_COLOR_INFO
+            color=root_config.EMBED_COLOR_INFO
         )
         
         # 编辑原消息以显示新视图和 embed

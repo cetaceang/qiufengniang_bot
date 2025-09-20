@@ -8,7 +8,7 @@ from src.guidance.repositories.user_progress_repository import UserProgressRepos
 from src.guidance.models.user_progress import UserProgress
 from src.guidance.utils.database import guidance_db_manager as db_manager # 暂时还需要它来获取模板等
 from src.guidance.utils.helpers import create_embed_from_template
-from src import config
+from src.guidance import config as guidance_config
 from typing import List, Dict, Any
 # 导入 UI 组件，这是正确的做法
 from src.guidance.ui.views.guidance_components import TagSelect
@@ -160,7 +160,7 @@ class GuidanceService:
             await self.user_progress_repo.create_or_reset(
                 member.id,
                 guild_id,
-                status=config.USER_STATUS_PENDING_SELECTION,
+                status=guidance_config.USER_STATUS_PENDING_SELECTION,
                 guidance_stage='stage_1_pending'
             )
             log.info(f"已向用户 {member.name} 发送第一阶段引导私信。")

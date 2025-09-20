@@ -8,7 +8,7 @@ import json
 
 from src.guidance.utils.database import guidance_db_manager as db_manager
 from src.guidance.utils.helpers import create_embed_from_template
-from src import config
+from src import config as root_config
 
 log = logging.getLogger(__name__)
 

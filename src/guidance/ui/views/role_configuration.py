@@ -7,7 +7,7 @@ from typing import List
 
 from src.guidance.utils.database import guidance_db_manager as db_manager
 from src.guidance.ui.views.ui_elements import BackButton
-from src import config
+from src import config as root_config
 from src.guidance.ui.modals.role_stage_modal import StageRoleModal
 
 log = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class RoleConfigurationView(View):
                 "1. **触发身份组**: 用户获得其中**任一**身份组后，将**首次**触发引导。\n"
                 "2. **阶段身份组**: 用于区分引导的不同阶段，必须是上面触发身份组的成员。"
             ),
-            color=config.EMBED_COLOR_INFO
+            color=root_config.EMBED_COLOR_INFO
         )
 
         # --- 显示触发身份组 ---

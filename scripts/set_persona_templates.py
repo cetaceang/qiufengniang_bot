@@ -4,11 +4,15 @@ import os
 import sys
 import re
 import json
+from dotenv import load_dotenv
+
+# 加载 .env 文件
+load_dotenv()
 
 # 将 src 目录添加到 Python 路径中
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
-from utils.database import db_manager
+from guidance.utils.database import guidance_db_manager as db_manager
 from config import GUILD_ID
 
 def parse_markdown_templates(file_path):
@@ -80,7 +84,7 @@ async def main():
     try:
         # 获取脚本所在目录的父目录，然后拼接 persona_templates.md
         script_dir = os.path.dirname(__file__)
-        templates_file = os.path.join(script_dir, '..', 'persona_templates.md')
+        templates_file = os.path.join(script_dir, '..', 'docs', 'persona_templates.md')
         templates_data = parse_markdown_templates(templates_file)
         print(f"✅ 解析成功，找到 {len(templates_data)} 个模板。")
     except Exception as e:

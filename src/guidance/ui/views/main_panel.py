@@ -11,7 +11,7 @@ from src.guidance.ui.views.message_templates import MessageTemplatesView
 from src.guidance.ui.views.channel_message_config import ChannelMessageConfigView
 from src.guidance.ui.views.deployment import DeploymentView
 
-from src import config # 导入配置文件以使用颜色
+from src import config as root_config # 导入配置文件以使用颜色
 from src.guidance.utils.database import guidance_db_manager as db_manager
 
 class MainPanelView(View):
@@ -37,7 +37,7 @@ class MainPanelView(View):
         embed = discord.Embed(
             title=f"⚙️ {self.guild.name} 新人引导管理面板",
             description="欢迎使用统一管理面板。请通过下方的按钮选择您要配置的项目。",
-            color=config.EMBED_COLOR_INFO
+            color=root_config.EMBED_COLOR_INFO
         )
         # 异步获取配置状态
         deployed_panel = await db_manager.get_deployed_panel(self.guild.id)

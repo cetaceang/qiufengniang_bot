@@ -8,7 +8,7 @@ from typing import Optional
 from src.guidance.utils.database import guidance_db_manager as db_manager
 from src.guidance.ui.modals.path_modal import PathModal
 from src.guidance.ui.views.ui_elements import BackButton
-from src import config
+from src import config as root_config
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class PathConfigurationView(View):
         embed = discord.Embed(
             title="🗺️ 路径设置",
             description="请先从下方的下拉菜单中选择一个标签，然后为其添加、删除或排序引导路径点。",
-            color=config.EMBED_COLOR_INFO
+            color=root_config.EMBED_COLOR_INFO
         )
         if self.selected_tag_id:
             tag = next((t for t in self.tags if t['tag_id'] == self.selected_tag_id), None)

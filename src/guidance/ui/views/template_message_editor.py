@@ -7,7 +7,8 @@ import uuid
 
 from src.guidance.utils.database import guidance_db_manager as db_manager
 from src.guidance.ui.modals.template_message_item_modal import TemplateMessageItemModal
-from src import config
+from src.guidance import config as guidance_config
+from src import config as root_config
 
 class TemplateMessagesEditView(View):
     """
@@ -54,12 +55,12 @@ class TemplateMessagesEditView(View):
 
     def create_embed(self) -> discord.Embed:
         """创建或更新用于显示消息列表的 Embed。"""
-        template_label = config.TEMPLATE_TYPES.get(self.template_name, {}).get("label", self.template_name)
+        template_label = guidance_config.TEMPLATE_TYPES.get(self.template_name, {}).get("label", self.template_name)
         
         embed = discord.Embed(
             title=f"正在编辑: {template_label}",
             description="在这里管理该模板下的多条消息。用户将会看到一个带按钮的消息，可以顺序浏览它们。",
-            color=config.EMBED_COLOR_INFO
+            color=root_config.EMBED_COLOR_INFO
         )
 
         if not self.messages:

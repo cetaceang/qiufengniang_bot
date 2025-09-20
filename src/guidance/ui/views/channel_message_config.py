@@ -7,7 +7,7 @@ from src.guidance.utils.database import guidance_db_manager as db_manager
 from src.guidance.ui.modals.channel_message_modal import ChannelMessageModal
 from src.guidance.ui.modals.extra_config_modal import ExtraConfigModal
 from src.guidance.ui.views.temporary_message_editor import TemporaryMessagesEditView
-from src import config
+from src import config as root_config
 import json
 
 class ChannelMessageConfigView(View):
@@ -62,7 +62,7 @@ class ChannelMessageConfigView(View):
                         "1. **从下方选择一个已在引导路径中配置过的地点**。\n"
                         "2. 点击 **“配置此地点消息”** 来添加或编辑该地点的消息。\n"
                         "3. 点击 **“删除此地点配置”** 来移除该地点的设置。",
-            color=config.EMBED_COLOR_INFO
+            color=root_config.EMBED_COLOR_INFO
         )
 
         all_configs = await db_manager.get_all_channel_messages(self.guild.id)

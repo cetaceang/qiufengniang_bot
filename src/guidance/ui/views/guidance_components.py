@@ -9,7 +9,7 @@ from typing import List, Dict, Any
 # 从我们自己的模块中导入
 from src.guidance.utils.database import guidance_db_manager as db_manager
 from src.guidance.utils.helpers import create_embed_from_template
-from src import config
+from src.guidance import config as guidance_config
 
 log = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class TagSelect(discord.ui.Select):
                 await db_manager.update_user_progress(
                     interaction.user.id,
                     self.guild_id,
-                    status=config.USER_STATUS_COMPLETED,
+                    status=guidance_config.USER_STATUS_COMPLETED,
                     guidance_stage='stage_1_completed',
                     selected_tags_json=json.dumps(selected_tag_ids),
                     generated_path_json=json.dumps(merged_path),
@@ -200,7 +200,7 @@ class TagSelect(discord.ui.Select):
             await db_manager.update_user_progress(
                 interaction.user.id,
                 self.guild_id,
-                status=config.USER_STATUS_IN_PROGRESS,
+                status=guidance_config.USER_STATUS_IN_PROGRESS,
                 guidance_stage='stage_1_in_progress',
                 selected_tags_json=json.dumps(selected_tag_ids),
                 generated_path_json=json.dumps(merged_path), # 存储完整路径作为原始记录

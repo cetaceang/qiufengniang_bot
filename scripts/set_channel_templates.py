@@ -5,11 +5,15 @@ import sys
 import re
 import json
 from collections import defaultdict
+from dotenv import load_dotenv
+
+# 加载 .env 文件
+load_dotenv()
 
 # 将 src 目录添加到 Python 路径中
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
-from utils.database import db_manager
+from guidance.utils.database import guidance_db_manager as db_manager
 from config import GUILD_ID
 
 def parse_markdown_templates(file_path):
@@ -101,7 +105,7 @@ async def main():
     print("正在解析 channel_templates.md 文件...")
     try:
         script_dir = os.path.dirname(__file__)
-        templates_file = os.path.join(script_dir, '..', 'channel_message.md')
+        templates_file = os.path.join(script_dir, '..', 'docs', 'channel_message.md')
         templates_data = parse_markdown_templates(templates_file)
         print(f"✅ 解析成功，找到 {len(templates_data)} 个模板定义。")
     except Exception as e:
