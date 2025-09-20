@@ -76,7 +76,7 @@ class CoinCog(commands.Cog):
                         item['price'] = 10
                         break
             
-            view = SimpleShopView(interaction.user, balance, items)
+            view = SimpleShopView(self.bot, interaction.user, balance, items)
             
             embed = view.create_shop_embed()
             

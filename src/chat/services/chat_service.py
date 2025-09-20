@@ -114,6 +114,9 @@ class ChatService:
             # PromptService 内部会处理合并用户消息的逻辑，这里我们总是传递 final_content
             message_to_send = final_content if final_content.strip() else None
             
+            # 记录发送给AI的核心上下文
+            log.info(f"发送给AI -> 用户: {author.display_name}, 消息: '{message_to_send}', 频道上下文: '{channel_context}'")
+            
             ai_response = await gemini_service.generate_response(
                 author.id,
                 guild_id,

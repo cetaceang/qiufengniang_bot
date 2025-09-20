@@ -9,8 +9,8 @@ class ProfileEditModal(discord.ui.Modal, title="创建你的个人记忆档案")
     """
     一个模态框，用于让用户创建或编辑他们的个人档案。
     """
-    def __init__(self):
-        super().__init__(custom_id=PROFILE_MODAL_CUSTOM_ID)
+    def __init__(self, custom_id: str = PROFILE_MODAL_CUSTOM_ID):
+        super().__init__(custom_id=custom_id)
     # 定义档案字段
     name = discord.ui.TextInput(
         label="你的称呼",

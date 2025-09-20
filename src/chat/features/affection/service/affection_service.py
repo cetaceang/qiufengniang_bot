@@ -185,20 +185,26 @@ class AffectionService:
             "daily_cap": AFFECTION_CONFIG["DAILY_CHAT_AFFECTION_CAP"]
         }
 
-    def get_affection_level_info(self, points: int) -> Dict[str, Any]:
-        """根据好感度点数获取对应的等级信息和提示词。"""
-        for level in self.affection_levels:
-            if level["min_affection"] <= points <= level["max_affection"]:
+    def get_affection_level_info(self, points: float) -> Dict[str, Any]:
+        """根据好感度点数获取对应的等级信息和提示词，现在可以处理浮点数和超出范围的值。"""
+        if not self.affection_levels:
+            log.error("好感度等级配置为空，返回默认等级。")
+            return {
+                "id": "default", "min_affection": 0, "max_affection": 19,
+                "level_name": "陌生", "prompt": "你对用户还不太熟悉，保持礼貌和一定的距离感。"
+            }
+
+        # 按 min_affection 升序排序
+        sorted_levels = sorted(self.affection_levels, key=lambda x: x['min_affection'])
+
+        # 从最高等级开始反向查找，找到第一个低于或等于当前点数的等级
+        for level in reversed(sorted_levels):
+            if points >= level['min_affection']:
                 return level
-        # 如果没有匹配到，返回一个默认的“陌生”或“中立”等级
-        log.warning(f"未找到好感度点数 {points} 对应的等级，返回默认等级。")
-        return {
-            "id": "default",
-            "min_affection": 0,
-            "max_affection": 19,
-            "level_name": "陌生",
-            "prompt": "你对用户还不太熟悉，保持礼貌和一定的距离感。"
-        }
+
+        # 如果点数低于所有定义的最低标准，则返回最低等级
+        log.warning(f"好感度点数 {points} 低于所有定义的最低标准，返回最低等级。")
+        return sorted_levels[0]
 
     async def apply_daily_fluctuation(self, guild_id: int):
         """为服务器中的所有用户应用每日好感度随机浮动。"""

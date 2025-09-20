@@ -280,6 +280,7 @@ class GeminiService:
             processed_contents = self._prepare_api_contents(final_conversation)
             
             # 4. 执行 API 调用
+            # 4. 执行 API 调用
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 self.executor,

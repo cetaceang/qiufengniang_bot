@@ -113,7 +113,9 @@ class MessageProcessor:
         image_data_list.extend(emoji_images)
 
         # 4. 清理文本内容
-        clean_content = self._clean_message_content(content_with_placeholders, message.mentions)
+        # 根据用户反馈，我们不考虑私聊场景，因此可以直接从 message.guild.me 获取机器人用户对象
+        bot_user = message.guild.me
+        clean_content = self._clean_message_content(content_with_placeholders, message.mentions, bot_user)
 
         # 5. 组合最终的文本内容
         final_content = f"{replied_message_content}{clean_content}"
@@ -141,14 +143,22 @@ class MessageProcessor:
                     log.error(f"读取图片附件 {attachment.filename} 时出错: {e}")
         return image_data_list
 
-    def _clean_message_content(self, content: str, mentions: list) -> str:
+    def _clean_message_content(self, content: str, mentions: list, bot_user: discord.ClientUser) -> str:
         """
-        清理消息内容，移除@mention部分，并清理括号内容。
+        清理消息内容，将对自身的@mention替换为名字，并移除其他@mention。
         """
-        # 移除所有@mention
+        # 处理所有@mention
         for user in mentions:
-            content = content.replace(f'<@{user.id}>', '').replace(f'<@!{user.id}>', '')
-        
+            mention_str_1 = f'<@{user.id}>'
+            mention_str_2 = f'<@!{user.id}>'
+            if user.id == bot_user.id:
+                # 如果是机器人自己，替换为名字
+                replacement = f'@{bot_user.display_name}'
+                content = content.replace(mention_str_1, replacement).replace(mention_str_2, replacement)
+            else:
+                # 否则，移除提及
+                content = content.replace(mention_str_1, '').replace(mention_str_2, '')
+
         # 使用 regex_service 清理用户输入中的所有指定括号
         content = regex_service.clean_user_input(content)
         
