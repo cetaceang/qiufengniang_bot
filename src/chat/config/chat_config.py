@@ -66,7 +66,7 @@ AFFECTION_CONFIG = {
     "INCREASE_AMOUNT": 1,         # 每次增加的点数
     "DAILY_CHAT_AFFECTION_CAP": 20, # 每日通过对话获取的好感度上限
     "BLACKLIST_PENALTY": -5,    # 被AI拉黑时扣除的点数
-    "DAILY_FLUCTUATION": (-5, 5)  # 每日好感度随机浮动的范围
+    "DAILY_FLUCTUATION": (-3, 8)  # 每日好感度随机浮动的范围
 }
 
 # --- 投喂功能 ---
