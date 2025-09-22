@@ -236,7 +236,6 @@ class WorldBookCog(commands.Cog):
                 new_embed.description = embed_description
                 new_embed.color = discord.Color.green()
                 await message.edit(embed=new_embed)
-                await message.clear_reactions()
             else:
                 log.warning(f"无法识别的条目类型 '{entry_type}' (审核ID: {pending_id})，未执行任何操作。")
                 conn.rollback()
@@ -312,7 +311,6 @@ class WorldBookCog(commands.Cog):
                 new_embed.color = discord.Color.red()
                 
                 await message.edit(embed=new_embed)
-                await message.clear_reactions()
             
             log.info(f"审核ID #{pending_id} 已被否决，原因: {reason}")
 

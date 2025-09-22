@@ -86,9 +86,26 @@ class CommunityMemberUploadModal(discord.ui.Modal, title="上传社区成员档�
 
     async def on_submit(self, interaction: discord.Interaction):
         """当用户提交模态窗口时调用"""
-        # --- 如果是通过商店购买，先处理扣款 ---
+        member_name = self.member_name_input.value.strip()
+        discord_id = self.discord_id_input.value.strip()
+        personality = self.personality_input.value.strip()
+        background = self.background_input.value.strip()
+        preferences = self.preferences_input.value.strip()
+
+        # 首先进行输入验证
+        if discord_id and not discord_id.isdigit():
+            await interaction.response.send_message("❌ Discord ID 必须为纯数字，请重新提交。", ephemeral=True)
+            return
+        
+        if not member_name or not personality:
+            await interaction.response.send_message("成员名称和性格特点不能为空。", ephemeral=True)
+            return
+
+        # 验证通过后，延迟响应，以处理后续可能耗时的操作
+        await interaction.response.defer(ephemeral=True)
+
+        # --- 如果是通过商店购买，处理扣款 ---
         if self.purchase_info:
-            await interaction.response.defer(ephemeral=True) # 延迟响应以处理扣款
             from src.chat.features.odysseia_coin.service.coin_service import coin_service
             
             price = self.purchase_info.get('price', 0)
@@ -106,20 +123,6 @@ class CommunityMemberUploadModal(discord.ui.Modal, title="上传社区成员档�
                     await interaction.followup.send("抱歉，你的余额似乎不足，购买失败。", ephemeral=True)
                     return
         # --- 扣款逻辑结束 ---
-
-        member_name = self.member_name_input.value.strip()
-        discord_id = self.discord_id_input.value.strip()
-        personality = self.personality_input.value.strip()
-        background = self.background_input.value.strip()
-        preferences = self.preferences_input.value.strip()
-        
-        if discord_id and not discord_id.isdigit():
-            await interaction.response.send_message("❌ Discord ID 必须为纯数字，请重新提交。", ephemeral=True)
-            return
-        
-        if not member_name or not personality:
-            await interaction.response.send_message("成员名称和性格特点不能为空。", ephemeral=True)
-            return
         
         member_data = {
             'name': member_name,

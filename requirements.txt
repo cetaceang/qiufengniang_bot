@@ -18,3 +18,8 @@ gunicorn
 eventlet
 docker
 psutil
+
+# 测试依赖
+pytest
+pytest-asyncio
+pytest-dotenv

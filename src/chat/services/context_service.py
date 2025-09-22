@@ -158,13 +158,18 @@ class ContextService:
                             ref_content_cleaned = self.clean_message_content(ref_msg.content, ref_msg.guild)
                             # 创建更丰富的回复信息，包括被回复的内容摘要
                             # 使用更不容易被模型模仿的括号和格式来构造回复信息
-                            cleaned_reply_author_name = regex_service.clean_user_input(ref_msg.author.display_name)
-                            reply_info = f'[回复 {cleaned_reply_author_name}] '
+                            original_reply_author_name = ref_msg.author.display_name
+                            cleaned_reply_author_name = regex_service.clean_user_input(original_reply_author_name)
+                            log.info(f"[DEBUG] Sanitizing reply author name. Original: '{original_reply_author_name}', Cleaned: '{cleaned_reply_author_name}'")
+                            reply_info = f'[回复 {ref_msg.author.display_name}] '
                     except (discord.NotFound, discord.Forbidden):
                         log.warning(f"无法找到或无权访问被回复的消息 ID: {msg.reference.message_id}")
                         pass # 获取失败则静默忽略
 
-                cleaned_author_name = regex_service.clean_user_input(msg.author.display_name)
+                # 在处理消息前，记录并清理作者昵称
+                original_author_name = msg.author.display_name
+                cleaned_author_name = regex_service.clean_user_input(original_author_name)
+                log.info(f"[DEBUG] Sanitizing message author name. Original: '{original_author_name}', Cleaned: '{cleaned_author_name}'")
 
                 if msg.author.id == self.bot.user.id or \
                    (config.BRAIN_GIRL_APP_ID and msg.author.id == config.BRAIN_GIRL_APP_ID):
@@ -176,7 +181,7 @@ class ContextService:
                         })
                         user_messages_buffer = []
                     
-                    bot_message_content = f'{reply_info}{cleaned_author_name}: {clean_content}'
+                    bot_message_content = f'{reply_info}{msg.author.display_name}: {clean_content}'
                     model_messages_buffer.append(bot_message_content)
                 else:
                     # 用户的消息 (user) - 冲洗模型缓冲区，然后将消息添加到用户缓冲区
@@ -187,7 +192,7 @@ class ContextService:
                         })
                         model_messages_buffer = []
 
-                    formatted_message = f'[user]: {reply_info}{cleaned_author_name}: {clean_content}'
+                    formatted_message = f'[user]: {reply_info}{msg.author.display_name}: {clean_content}'
                     user_messages_buffer.append(formatted_message)
 
             # 循环结束后，如果缓冲区还有用户消息，全部作为最后一个'user'回合提交

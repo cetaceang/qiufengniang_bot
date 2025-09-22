@@ -7,7 +7,7 @@ from typing import Dict
 from datetime import datetime, timezone
 
 from src.chat.utils.database import chat_db_manager
-from src.chat.config.chat_config import PERSONAL_MEMORY_CONFIG, PROMPT_CONFIG, SUMMARY_MODEL
+from src.chat.config.chat_config import PERSONAL_MEMORY_CONFIG, PROMPT_CONFIG, SUMMARY_MODEL, GEMINI_SUMMARY_GEN_CONFIG
 from src.chat.features.personal_memory.ui.profile_modal import ProfileEditView
 from src.chat.services.gemini_service import gemini_service
 from src.chat.features.world_book.services.incremental_rag_service import incremental_rag_service
@@ -182,6 +182,7 @@ class PersonalMemoryService:
 
     async def summarize_and_save_memory(self, user_id: int, guild_id: int):
         """获取用户的对话历史（根据 guild_id 区分私聊和频道），生成摘要，并保存到数据库。"""
+        log.info(f"用户 {user_id} 在 guild_id {guild_id} 的个人消息已达到 {PERSONAL_MEMORY_CONFIG['summary_threshold']} 条，触发总结。")
         log.debug(f"=== 开始为用户 {user_id} 在 guild_id {guild_id} 生成个人记忆摘要 ===")
         
         # 1. 获取对话历史
@@ -219,40 +220,44 @@ class PersonalMemoryService:
             
         log.debug(f"格式化后的对话文本长度: {len(dialogue_text)} 字符")
             
-        # 3. 构建 Prompt 并调用 AI 生成摘要
+        # 3. 获取旧摘要
+        user_profile = await self.db_manager.get_user_profile(user_id)
+        old_summary = user_profile['personal_summary'] if user_profile and user_profile['personal_summary'] else '无'
+        log.debug(f"获取到用户 {user_id} 的过往记忆摘要，长度: {len(old_summary)} 字符")
+        log.debug(f"[MEMORY_SUMMARY] 过往记忆摘要:\n--- OLD SUMMARY ---\n{old_summary}\n-------------------")
+
+        # 4. 构建 Prompt 并调用 AI 生成摘要
         prompt_template = PROMPT_CONFIG.get("personal_memory_summary")
         if not prompt_template:
             log.error("在 PROMPT_CONFIG 中未找到 'personal_memory_summary'。")
             return
             
-        final_prompt = prompt_template.format(dialogue_history=dialogue_text)
-        log.debug(f"步骤 2: 构建总结Prompt完成，长度: {len(final_prompt)} 字符")
-        log.debug(f"完整Prompt预览: {final_prompt[:200]}...")
+        final_prompt = prompt_template.format(
+            old_summary=old_summary,
+            dialogue_history=dialogue_text
+        )
+        log.debug(f"[MEMORY_SUMMARY] 用于总结的近期对话:\n--- DIALOGUE HISTORY ---\n{dialogue_text}\n------------------------")
+        log.debug(f"步骤 2: 构建分层总结Prompt完成，长度: {len(final_prompt)} 字符")
+        log.debug(f"完整Prompt预览: {final_prompt[:300]}...")
         
-        log.debug("步骤 3: 调用AI生成摘要...")
-        summary = await gemini_service.generate_text(
+        log.debug("步骤 3: 调用AI生成精炼摘要...")
+        # 调用增强后的 simple_response 函数，传入完整的配置和模型名称
+        new_summary = await gemini_service.generate_simple_response(
             prompt=final_prompt,
-            temperature=0.5,
+            generation_config=GEMINI_SUMMARY_GEN_CONFIG,
             model_name=SUMMARY_MODEL
         )
         
-        # 4. 保存摘要到数据库
-        if summary:
-            log.debug(f"步骤 4: 成功为用户 {user_id} 生成摘要，长度: {len(summary)} 字符")
-            log.debug(f"摘要内容预览: {summary[:100]}...")
+        # 5. 保存摘要到数据库
+        if new_summary:
+            log.debug(f"步骤 4: 成功为用户 {user_id} 生成新的精炼摘要，长度: {len(new_summary)} 字符")
+            log.debug(f"新摘要内容预览: {new_summary[:150]}...")
+            log.debug(f"[MEMORY_SUMMARY] AI生成的新摘要:\n--- NEW SUMMARY ---\n{new_summary}\n-------------------")
             
-            user_profile = await self.db_manager.get_user_profile(user_id)
-            old_summary = user_profile['personal_summary'] if user_profile and user_profile['personal_summary'] else ''
-            
-            if old_summary and old_summary.strip():
-                log.debug("检测到已有旧摘要，将进行合并")
-                new_summary = f"{old_summary}\n\n---\n\n{summary}"
-            else:
-                log.debug("没有旧摘要，创建新摘要")
-                new_summary = summary
-
+            # 使用新摘要完全替换旧摘要
             await self.db_manager.update_personal_summary(user_id, new_summary)
-            log.info(f"步骤 5: 成功为用户 {user_id} 生成并保存了新的个人记忆摘要。")
+            log.info(f"已成功为用户 {user_id} 更新记忆摘要。")
+            log.info(f"步骤 5: 成功为用户 {user_id} 生成并覆盖保存了新的个人记忆摘要。")
         else:
             log.error(f"为用户 {user_id} 生成个人记忆摘要失败。AI服务返回空结果。")
             

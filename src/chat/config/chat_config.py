@@ -47,6 +47,20 @@ GEMINI_GIFT_GEN_CONFIG = {
     "max_output_tokens": 3000,
 }
 
+# 用于生成帖子夸奖的配置
+GEMINI_THREAD_PRAISE_CONFIG = {
+    "temperature": 1.21,
+    "top_p": 0.97,
+    "top_k": 40,
+    "max_output_tokens": 2000,
+}
+
+# 用于生成个人记忆摘要的配置
+GEMINI_SUMMARY_GEN_CONFIG = {
+    "temperature": 0.5,
+    "max_output_tokens": 2000,
+}
+
 COOLDOWN_RATES = {
     "default": 2,  # 每分钟请求次数
     "coffee": 5,   # 每分钟请求次数
@@ -96,15 +110,20 @@ CHANNEL_MEMORY_CONFIG = {
 # --- Prompt 配置 ---
 PROMPT_CONFIG = {
     "personal_memory_summary": (
-        "你是一个信息总结专家。请为以下对话历史生成一份高度概括的、要点式的摘要。\n\n"
-        "要求：\n"
-        "1. 摘要必须采用列表的格式。\n"
-        "2. 每条摘要都应极其简练，只保留最核心的信息。\n"
-        "3. 重点关注用户的核心观点、情绪变化、以及明确提出的需求或问题。\n"
-        "4. 总结的条目总数不应超过10条。\n"
-        "5. 使用第三人称视角进行客观陈述。\n\n"
-        "对话历史：\n{dialogue_history}\n\n"
-        "摘要：\n"
+        "你是一个严谨的记忆史官，你的唯一任务是记录和延续，而非创造或总结。\n"
+        "你将收到【过往记忆】和【近期对话】。你的工作是生成一份【全新记忆】，这份新记忆必须遵循以下铁律：\n\n"
+        "**铁律一：绝对保留**\n"
+        "【过往记忆】中的所有条目，必须一字不差、按原顺序完整地复制到【全新记忆】的开头。\n\n"
+        "**铁律二：时序追加**\n"
+        "从【近期对话】中提取新的、有价值的记忆点，作为新的列表项，**追加**到内容的**末尾**。\n\n"
+        "**铁律三：客观记录**\n"
+        "所有记忆点都必须使用客观的第三人称（例如“该用户...”、“他/她...”）。\n\n"
+        "**格式要求**\n"
+        "使用 Markdown 的无序列表 (`- `) 格式。\n\n"
+        "**输入内容:**\n"
+        "【过往记忆】:\n{old_summary}\n\n"
+        "【近期对话】:\n{dialogue_history}\n\n"
+        "**请严格遵循铁律，生成【全新记忆】:**\n"
     )
 }
 
@@ -171,3 +190,14 @@ GIFT_PROMPT = """
 你的回复应该自然且符合角色设定。
 请直接输出回复内容，不要添加任何引导语。
 """
+
+# --- 帖子评价功能 ---
+# 功能总开关
+THREAD_COMMENTOR_ENABLED = os.getenv("THREAD_COMMENTOR_ENABLED", "False").lower() == "true"
+# 指定需要评价的论坛频道ID列表
+TARGET_FORUM_CHANNELS = _parse_ids("TARGET_FORUM_CHANNELS")
+
+# --- 调试配置 ---
+DEBUG_CONFIG = {
+    "LOG_FINAL_CONTEXT": False, # 是否在日志中打印发送给AI的最终上下文，用于调试
+}

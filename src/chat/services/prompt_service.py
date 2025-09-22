@@ -12,6 +12,7 @@ from google.genai import types
 
 from src.chat.config.prompts import SYSTEM_PROMPT
 from src import config
+from src.chat.config import chat_config
 
 log = logging.getLogger(__name__)
 
@@ -120,16 +121,16 @@ class PromptService:
                 
                 if first_text_index != -1:
                     # 在第一个文本元素前加上前缀
-                    processed_parts[first_text_index] = f'[user]: {user_name}: {processed_parts[first_text_index]}'
+                    processed_parts[first_text_index] = f'用户名:{user_name}, 用户消息:{processed_parts[first_text_index]}'
                 else:
                     # 如果全是图片，没有文本，就在最前面加上前缀
-                    processed_parts.insert(0, f'[user]: {user_name}: ')
+                    processed_parts.insert(0, f'用户名:{user_name}, 用户消息:')
 
             current_user_parts.extend(processed_parts)
 
         # 如果没有任何文本，但有附件，添加一个默认的用户标签
         if not message and attachment_images:
-            current_user_parts.append(f'[user]: {user_name}: (图片消息)')
+            current_user_parts.append(f'用户名:{user_name}, 用户消息:(图片消息)')
 
         # 追加所有附件图片到末尾
         for img_data in attachment_images:
@@ -148,30 +149,67 @@ class PromptService:
             else:
                 final_conversation.append({"role": "user", "parts": current_user_parts})
 
+        if chat_config.DEBUG_CONFIG["LOG_FINAL_CONTEXT"]:
+            log.debug(f"发送给AI的最终提示词: {json.dumps(final_conversation, ensure_ascii=False, indent=2)}")
+
         return final_conversation
 
     def _format_world_book_entries(self, entries: Optional[List[Dict]], user_name: str) -> str:
         """将世界书条目列表格式化为独立的知识注入消息。"""
         if not entries:
             return ""
-        
-        all_contents = []
-        for entry in entries:
+
+        formatted_entries = []
+        for i, entry in enumerate(entries):
             content_value = entry.get('content')
+            metadata = entry.get('metadata', {})
+            distance = entry.get('distance')
+
+            # 提取内容
+            content_str = ""
             if isinstance(content_value, list) and content_value:
-                all_contents.append(str(content_value[0]))
+                content_str = str(content_value[0])
             elif isinstance(content_value, str):
-                # 过滤掉包含“未提供”的行
-                filtered_lines = [line for line in content_value.split('\n') if '未提供' not in line]
-                if filtered_lines:
-                    all_contents.append('\n'.join(filtered_lines))
-        
-        if all_contents:
-            subject_name = entries[0].get('id', '多个主题')
-            header = f"这是关于 '{subject_name}' 的一些记忆，可能与当前对话相关，也可能不相关。请你酌情参考：\n"
-            body = "\n---\n".join(all_contents)
-            return f"{header}<world_book_context>\n{body}\n</world_book_context>"
-        
+                content_str = content_value
+
+            # 过滤掉包含“未提供”的行
+            filtered_lines = [line for line in content_str.split('\n') if '未提供' not in line]
+            if not filtered_lines:
+                continue  # 如果过滤后内容为空，则跳过此条目
+
+            final_content = '\n'.join(filtered_lines)
+
+            # 构建条目头部
+            header = f"\n\n--- 搜索结果 {i + 1} ---\n"
+            
+            # 构建元数据部分
+            meta_parts = []
+            if distance is not None:
+                relevance = max(0, 1 - distance)
+                meta_parts.append(f"相关性: {relevance:.2%}")
+            
+            category = metadata.get('category')
+            if category:
+                meta_parts.append(f"分类: {category}")
+            
+            source = metadata.get('source')
+            if source:
+                meta_parts.append(f"来源: {source}")
+
+            meta_str = f"[{' | '.join(meta_parts)}]\n" if meta_parts else ""
+
+            formatted_entries.append(f"{header}{meta_str}{final_content}")
+
+        if formatted_entries:
+            # 使用第一个有效条目的ID作为主题，如果找不到则使用通用名称
+            main_subject = "相关信息"
+            if entries and entries[0].get('id'):
+                main_subject = entries[0].get('id')
+
+            header = f"这是关于 '{main_subject}' 的一些记忆，可能与当前对话相关，也可能不相关。请你酌情参考：\n"
+            body = "".join(formatted_entries)
+            return f"{header}<world_book_context>{body}\n\n</world_book_context>"
+
         return ""
 
     def build_rag_summary_prompt(self, latest_query: str, user_name: str, conversation_history: Optional[List[Dict[str, Any]]]) -> str:

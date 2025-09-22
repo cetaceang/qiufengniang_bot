@@ -471,14 +471,15 @@ class GeminiService:
             if key_obj:
                 await self.key_rotation_service.release_key(key_obj.key, success=True)
 
-    async def generate_simple_response(self, prompt: str, generation_config: Dict) -> Optional[str]:
+    async def generate_simple_response(self, prompt: str, generation_config: Dict, model_name: Optional[str] = None) -> Optional[str]:
         """
-        一个用于单次、非对话式文本生成的方法，允许传入完整的生成配置。
+        一个用于单次、非对话式文本生成的方法，允许传入完整的生成配置和可选的模型名称。
         非常适合用于如“礼物回应”、“投喂”等需要自定义生成参数的一次性任务。
 
         Args:
             prompt: 提供给模型的完整输入提示。
             generation_config: 一个包含生成参数的字典 (e.g., temperature, max_output_tokens).
+            model_name: (可选) 指定要使用的模型。如果为 None，则使用默认的聊天模型。
 
         Returns:
             生成的文本字符串，如果失败则返回 None。
@@ -494,7 +495,7 @@ class GeminiService:
                 **generation_config,
                 safety_settings=self.safety_settings
             )
-            final_model_name = self.model_name
+            final_model_name = model_name or self.model_name
 
             response = await loop.run_in_executor(
                 self.executor,
@@ -531,6 +532,70 @@ class GeminiService:
             return None
         except Exception as e:
             log.error(f"generate_simple_response 时出现意外错误: {e}", exc_info=True)
+            return None
+        finally:
+            if key_obj:
+                await self.key_rotation_service.release_key(key_obj.key, success=True)
+
+    async def generate_thread_praise(self, prompt: str) -> Optional[str]:
+        """
+        专用于生成帖子夸奖的方法。
+        使用独立的、为创意生成优化的配置。
+
+        Args:
+            prompt: 包含帖子内容的完整提示。
+
+        Returns:
+            生成的夸奖文本，如果失败则返回 None。
+        """
+        key_obj = None
+        try:
+            key_obj = await self.key_rotation_service.acquire_key()
+            client = self._create_client_with_key(key_obj.key)
+            log.debug(f"为 generate_thread_praise 任务获取到密钥 ...{key_obj.key[-4:]}")
+
+            loop = asyncio.get_event_loop()
+            gen_config = types.GenerateContentConfig(
+                **app_config.GEMINI_THREAD_PRAISE_CONFIG,
+                safety_settings=self.safety_settings
+            )
+            final_model_name = self.model_name
+
+            response = await loop.run_in_executor(
+                self.executor,
+                lambda: client.models.generate_content(
+                    model=final_model_name,
+                    contents=[prompt],
+                    config=gen_config
+                )
+            )
+
+            if response.parts:
+                return response.text.strip()
+            
+            log.warning(f"generate_thread_praise 未能生成有效内容。API 响应: {response}")
+            if response.prompt_feedback and response.prompt_feedback.block_reason:
+                log.warning(f"请求可能被安全策略阻止，原因: {response.prompt_feedback.block_reason}")
+            
+            return None
+
+        except NoAvailableKeyError:
+            log.error("所有 API 密钥当前都不可用，无法生成帖子夸奖。")
+            return None
+        except google_exceptions.ResourceExhausted as e:
+            log.error(f"密钥 ...{key_obj.key[-4:]} 在 generate_thread_praise 时遭遇配额错误: {e}")
+            if key_obj:
+                await self.key_rotation_service.release_key(key_obj.key, success=False)
+                key_obj = None
+            return None
+        except google_exceptions.PermissionDenied as e:
+            log.error(f"密钥 ...{key_obj.key[-4:]} 无效或已被吊销: {e}")
+            if key_obj:
+                self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
+                key_obj = None
+            return None
+        except Exception as e:
+            log.error(f"generate_thread_praise 时出现意外错误: {e}", exc_info=True)
             return None
         finally:
             if key_obj:

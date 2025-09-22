@@ -52,19 +52,15 @@ class ContextServiceTest:
             return []
 
         history_parts = []
-        latest_user_message_content = ""
-        
         try:
             guild_id = channel.guild.id if channel.guild else 0
             anchor_message_id = await chat_db_manager.get_channel_memory_anchor(guild_id, channel_id)
             
             after_message = None
-            # 获取比限制多一条，以便找到最新的那条用户消息
-            fetch_limit = limit + 1 
+            fetch_limit = limit
             if anchor_message_id:
                 try:
                     after_message = discord.Object(id=anchor_message_id)
-                    fetch_limit = limit + 2
                     log.info(f"找到频道 {channel_id} 的记忆锚点: {anchor_message_id}，将从此消息之后开始获取历史。")
                 except Exception as e:
                     log.error(f"创建 discord.Object 失败，锚点ID {anchor_message_id} 可能无效: {e}")
@@ -93,14 +89,14 @@ class ContextServiceTest:
                     except (discord.NotFound, discord.Forbidden):
                         pass
                 
-                history_parts.append(f'[{msg.author.display_name}]: {reply_info}{clean_content}')
+                history_parts.append(f'{msg.author.display_name}: {reply_info}{clean_content}')
 
             # 构建最终的上下文列表
             final_context = []
             
             # 1. 将所有历史记录打包成一个 user 消息作为背景
             if history_parts:
-                background_prompt = "以下是历史对话，请你只针对用户的最新消息进行回复：\n\n" + "\n\n".join(history_parts)
+                background_prompt = "这是本次对话的背景历史记录:\n\n" + "\n\n".join(history_parts)
                 final_context.append({
                     "role": "user",
                     "parts": [background_prompt]
@@ -123,7 +119,7 @@ class ContextServiceTest:
                         user_profile_prompt = "\n\n这是与你对话的用户的已知信息：\n" + "\n".join(profile_details)
             
             log.debug(f"--- 个人档案注入诊断 (Test Service): 最终生成的档案提示长度: {len(user_profile_prompt)} ---")
-            model_reply = f"好的,我已了解以上频道的历史消息。{affection_level_prompt}{user_profile_prompt}"
+            model_reply = f"好的，我已了解历史对话的背景。{affection_level_prompt}{user_profile_prompt}"
             final_context.append({
                 "role": "model",
                 "parts": [model_reply]

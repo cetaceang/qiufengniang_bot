@@ -13,7 +13,7 @@ from src.chat.features.affection.service.affection_service import affection_serv
 from src.chat.features.odysseia_coin.service.coin_service import coin_service
 from src.chat.utils.database import chat_db_manager
 from src.chat.features.personal_memory.services.personal_memory_service import personal_memory_service
-from src.chat.config.chat_config import PERSONAL_MEMORY_CONFIG
+from src.chat.config.chat_config import PERSONAL_MEMORY_CONFIG, DEBUG_CONFIG
 
 log = logging.getLogger(__name__)
 
@@ -112,15 +112,24 @@ class ChatService:
 
             # 4. --- 调用AI生成回复 ---
             # PromptService 内部会处理合并用户消息的逻辑，这里我们总是传递 final_content
-            message_to_send = final_content if final_content.strip() else None
+            # --- 构建最终的用户消息 ---
+            # 使用新的格式来强化模型的注意力
+            final_user_prompt = f"用户名: {author.display_name} 内容: {final_content}"
+            
+            # 将格式化后的最新用户消息追加到上下文历史的末尾
+            channel_context.append({
+                "role": "user",
+                "parts": [final_user_prompt]
+            })
             
             # 记录发送给AI的核心上下文
-            log.info(f"发送给AI -> 用户: {author.display_name}, 消息: '{message_to_send}', 频道上下文: '{channel_context}'")
+            if DEBUG_CONFIG["LOG_FINAL_CONTEXT"]:
+                log.info(f"发送给AI -> 最终上下文: {channel_context}")
             
             ai_response = await gemini_service.generate_response(
                 author.id,
                 guild_id,
-                message_to_send,
+                message=final_content, # 保持 message 参数用于内部逻辑
                 images=image_data_list if image_data_list else None,
                 user_name=author.display_name,
                 channel_context=channel_context,
