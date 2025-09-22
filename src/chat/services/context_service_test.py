@@ -96,7 +96,7 @@ class ContextServiceTest:
             
             # 1. 将所有历史记录打包成一个 user 消息作为背景
             if history_parts:
-                background_prompt = "这是本次对话的背景历史记录:\n\n" + "\n\n".join(history_parts)
+                background_prompt = "这是本频道最近的对话记录:\n\n" + "\n\n".join(history_parts)
                 final_context.append({
                     "role": "user",
                     "parts": [background_prompt]

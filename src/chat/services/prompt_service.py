@@ -119,12 +119,13 @@ class PromptService:
                         first_text_index = i
                         break
                 
+                # 移除对当前用户消息的额外格式化，因为 message_processor 已经处理了
+                # 确保用户消息直接作为 parts 的一部分，不添加额外的“用户名:xxx, 用户消息:xxx”前缀
+                # 假设 processed_parts 已经包含了来自 message_processor 的正确格式化内容
+                
+                # 新增：为第一个文本部分添加用户名前缀
                 if first_text_index != -1:
-                    # 在第一个文本元素前加上前缀
-                    processed_parts[first_text_index] = f'用户名:{user_name}, 用户消息:{processed_parts[first_text_index]}'
-                else:
-                    # 如果全是图片，没有文本，就在最前面加上前缀
-                    processed_parts.insert(0, f'用户名:{user_name}, 用户消息:')
+                    processed_parts[first_text_index] = f'[{user_name}]{processed_parts[first_text_index]}'
 
             current_user_parts.extend(processed_parts)
 

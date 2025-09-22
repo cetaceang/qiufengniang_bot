@@ -158,18 +158,10 @@ class ContextService:
                             ref_content_cleaned = self.clean_message_content(ref_msg.content, ref_msg.guild)
                             # 创建更丰富的回复信息，包括被回复的内容摘要
                             # 使用更不容易被模型模仿的括号和格式来构造回复信息
-                            original_reply_author_name = ref_msg.author.display_name
-                            cleaned_reply_author_name = regex_service.clean_user_input(original_reply_author_name)
-                            log.info(f"[DEBUG] Sanitizing reply author name. Original: '{original_reply_author_name}', Cleaned: '{cleaned_reply_author_name}'")
                             reply_info = f'[回复 {ref_msg.author.display_name}] '
                     except (discord.NotFound, discord.Forbidden):
                         log.warning(f"无法找到或无权访问被回复的消息 ID: {msg.reference.message_id}")
                         pass # 获取失败则静默忽略
-
-                # 在处理消息前，记录并清理作者昵称
-                original_author_name = msg.author.display_name
-                cleaned_author_name = regex_service.clean_user_input(original_author_name)
-                log.info(f"[DEBUG] Sanitizing message author name. Original: '{original_author_name}', Cleaned: '{cleaned_author_name}'")
 
                 if msg.author.id == self.bot.user.id or \
                    (config.BRAIN_GIRL_APP_ID and msg.author.id == config.BRAIN_GIRL_APP_ID):
@@ -192,7 +184,11 @@ class ContextService:
                         })
                         model_messages_buffer = []
 
-                    formatted_message = f'[user]: {reply_info}{msg.author.display_name}: {clean_content}'
+                    # 格式化用户消息，符合用户期望的 [用户名]:xxxx 或 [用户名][回复xxx]:xxxx
+                    if reply_info:
+                        formatted_message = f'[{msg.author.display_name}]{reply_info}: {clean_content}'
+                    else:
+                        formatted_message = f'[{msg.author.display_name}]: {clean_content}'
                     user_messages_buffer.append(formatted_message)
 
             # 循环结束后，如果缓冲区还有用户消息，全部作为最后一个'user'回合提交
@@ -209,35 +205,11 @@ class ContextService:
                     "parts": ["\n\n".join(model_messages_buffer)]
                 })
             
-            # 新增：在历史记录的末尾，注入好感度和用户档案作为对下一条用户消息的上下文提示
-            affection_status = await affection_service.get_affection_status(user_id, guild_id)
-            affection_level_prompt = affection_status.get("prompt", "")
-
-            # --- 新增：获取并注入用户个人档案 ---
-            user_profile_prompt = ""
-            log.info(f"--- 个人档案注入诊断: 正在为用户 {user_id} 查找档案 ---")
-            user_profile = world_book_service.get_profile_by_discord_id(str(user_id))
-            log.info(f"--- 个人档案注入诊断: world_book_service 返回的档案: {user_profile} ---")
-            if user_profile:
-                # 找到档案，进行格式化
-                profile_content = user_profile.get('content', {})
-                if isinstance(profile_content, dict):
-                    # 只有当值不为空时，才添加到列表中
-                    profile_details = [f"{key}: {value}" for key, value in profile_content.items() if value and value != '未提供']
-                    log.info(f"--- 个人档案注入诊断: 过滤后的档案详情: {profile_details} ---")
-                    if profile_details: # 只有当列表不为空时才生成提示
-                        # 使用 \n\n 来增加与好感度提示之间的间距
-                        user_profile_prompt = "\n\n这是与你对话的用户的已知信息：\n" + "\n".join(profile_details)
-            
-            log.info(f"--- 个人档案注入诊断: 最终生成的档案提示长度: {len(user_profile_prompt)} ---")
-            # 使用 \n\n 来增加与档案或好感度提示之间的间距
-            model_reply = f"好的,上面是已知的历史消息,我会针对用户的最新消息进行回复。{affection_level_prompt}{user_profile_prompt}"
-            
+            # 频道历史只返回纯粹的对话历史，好感度和用户档案的注入由 prompt_service 统一处理
             history_list.append({
                 "role": "model",
-                "parts": [model_reply]
+                "parts": ["好的，上面是已知的历史消息，我会针对用户的最新消息进行回复。"]
             })
-
             return history_list
         except discord.Forbidden:
             log.error(f"机器人没有权限读取频道 {channel_id} 的消息历史。")

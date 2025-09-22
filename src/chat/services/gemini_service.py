@@ -178,6 +178,30 @@ class GeminiService:
         except TypeError:
             return str(obj)
 
+    @staticmethod
+    def _serialize_parts_for_logging_full(content: types.Content):
+        """自定义序列化函数，用于完整记录 Content 对象。"""
+        serialized_parts = []
+        for part in content.parts:
+            if part.text:
+                serialized_parts.append({"type": "text", "content": part.text})
+            elif part.inline_data:
+                serialized_parts.append({
+                    "type": "image",
+                    "mime_type": part.inline_data.mime_type,
+                    "data_size": len(part.inline_data.data),
+                    "data_preview": part.inline_data.data[:50].hex() + "..." # 记录数据前50字节的十六进制预览
+                })
+            elif part.file_data:
+                serialized_parts.append({
+                    "type": "file",
+                    "mime_type": part.file_data.mime_type,
+                    "file_uri": part.file_data.file_uri
+                })
+            else:
+                serialized_parts.append({"type": "unknown_part", "content": str(part)})
+        return {"role": content.role, "parts": serialized_parts}
+
     # --- Refactored generate_response and its helpers ---
     def _prepare_api_contents(self, conversation: List[Dict]) -> List[types.Content]:
         """将对话历史转换为 API 所需的 Content 对象列表。"""
@@ -278,8 +302,17 @@ class GeminiService:
                 gen_config.thinking_config = types.ThinkingConfig(thinking_budget=thinking_budget)
             
             processed_contents = self._prepare_api_contents(final_conversation)
+
+            # 如果开启了 AI 完整上下文日志，则打印到终端
+            if app_config.DEBUG_CONFIG["LOG_AI_FULL_CONTEXT"]:
+                log.info(f"--- AI 完整上下文日志 (用户 {user_id}) ---")
+                log.info(json.dumps(
+                    [self._serialize_parts_for_logging_full(content) for content in processed_contents],
+                    ensure_ascii=False,
+                    indent=2
+                ))
+                log.info("------------------------------------")
             
-            # 4. 执行 API 调用
             # 4. 执行 API 调用
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(

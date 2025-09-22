@@ -200,4 +200,5 @@ TARGET_FORUM_CHANNELS = _parse_ids("TARGET_FORUM_CHANNELS")
 # --- 调试配置 ---
 DEBUG_CONFIG = {
     "LOG_FINAL_CONTEXT": False, # 是否在日志中打印发送给AI的最终上下文，用于调试
+    "LOG_AI_FULL_CONTEXT": os.getenv("LOG_AI_FULL_CONTEXT", "False").lower() == "true", # 是否记录AI可见的完整上下文日志
 }
