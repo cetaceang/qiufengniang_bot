@@ -85,11 +85,13 @@ class ContextServiceTest:
                     try:
                         ref_msg = await channel.fetch_message(msg.reference.message_id)
                         if ref_msg and ref_msg.author:
-                            reply_info = f'[回复 {ref_msg.author.display_name}] '
+                            reply_info = f'[回复 {ref_msg.author.display_name}]'
                     except (discord.NotFound, discord.Forbidden):
                         pass
                 
-                history_parts.append(f'{msg.author.display_name}: {reply_info}{clean_content}')
+                # 强制在元信息（用户名和回复）后添加冒号，清晰地分割内容
+                user_meta = f'[{msg.author.display_name}]{reply_info}'
+                history_parts.append(f'{user_meta}: {clean_content}')
 
             # 构建最终的上下文列表
             final_context = []

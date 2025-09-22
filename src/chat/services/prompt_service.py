@@ -119,13 +119,21 @@ class PromptService:
                         first_text_index = i
                         break
                 
-                # 移除对当前用户消息的额外格式化，因为 message_processor 已经处理了
-                # 确保用户消息直接作为 parts 的一部分，不添加额外的“用户名:xxx, 用户消息:xxx”前缀
-                # 假设 processed_parts 已经包含了来自 message_processor 的正确格式化内容
-                
-                # 新增：为第一个文本部分添加用户名前缀
-                if first_text_index != -1:
-                    processed_parts[first_text_index] = f'[{user_name}]{processed_parts[first_text_index]}'
+                # 彻底重构当前用户消息的格式，确保 [用户名] 和冒号始终存在且正确
+                if first_text_index != -1 and isinstance(processed_parts[first_text_index], str):
+                    original_message = processed_parts[first_text_index]
+                    reply_info = ""
+                    clean_message = original_message
+
+                    # 匹配并提取回复块
+                    reply_match = re.match(r'^(\[回复\s*@?[^\]]+\])\s*', original_message)
+                    if reply_match:
+                        reply_info = reply_match.group(1)
+                        clean_message = original_message[reply_match.end():]
+
+                    # 重新构建，确保格式绝对正确
+                    formatted_message = f"[{user_name}]{reply_info}: {clean_message}"
+                    processed_parts[first_text_index] = formatted_message
 
             current_user_parts.extend(processed_parts)
 
