@@ -173,7 +173,8 @@ class ContextService:
                         })
                         user_messages_buffer = []
                     
-                    bot_message_content = f'{reply_info}{msg.author.display_name}: {clean_content}'
+                    # 统一历史消息中机器人和用户的回复格式，解决主语混淆问题
+                    bot_message_content = f'[{msg.author.display_name}]: {reply_info}{clean_content}'
                     model_messages_buffer.append(bot_message_content)
                 else:
                     # 用户的消息 (user) - 冲洗模型缓冲区，然后将消息添加到用户缓冲区
@@ -185,10 +186,8 @@ class ContextService:
                         model_messages_buffer = []
 
                     # 格式化用户消息，符合用户期望的 [用户名]:xxxx 或 [用户名][回复xxx]:xxxx
-                    if reply_info:
-                        formatted_message = f'[{msg.author.display_name}]{reply_info}: {clean_content}'
-                    else:
-                        formatted_message = f'[{msg.author.display_name}]: {clean_content}'
+                    # 恢复旧版格式，冒号始终在用户名后
+                    formatted_message = f'[{msg.author.display_name}]: {reply_info}{clean_content}'
                     user_messages_buffer.append(formatted_message)
 
             # 循环结束后，如果缓冲区还有用户消息，全部作为最后一个'user'回合提交

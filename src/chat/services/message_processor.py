@@ -100,7 +100,8 @@ class MessageProcessor:
                 if ref_msg and ref_msg.author:
                     # 清理被回复消息的文本
                     ref_content_cleaned = self._clean_message_content(ref_msg.content, ref_msg.mentions, bot_user)
-                    replied_message_content = f'[回复 @{ref_msg.author.display_name}: "{ref_content_cleaned}"] '
+                    # 采用新的引用格式，以解决AI主语混淆问题
+                    replied_message_content = f'> 回复 @{ref_msg.author.display_name}: "{ref_content_cleaned}"\n'
                     
                     # 提取被回复消息中的图片
                     if ref_msg.attachments:
@@ -118,7 +119,11 @@ class MessageProcessor:
         clean_content = self._clean_message_content(content_with_placeholders, message.mentions, bot_user)
 
         # 5. 组合最终的文本内容
-        final_content = f"{replied_message_content}{clean_content}"
+        # 组合最终文本，当有回复时，使用新的带换行的格式
+        if replied_message_content:
+            final_content = f"[{message.author.display_name}]:\n{replied_message_content}{clean_content}"
+        else:
+            final_content = f"[{message.author.display_name}]: {clean_content}"
 
         return {
             "final_content": final_content,
