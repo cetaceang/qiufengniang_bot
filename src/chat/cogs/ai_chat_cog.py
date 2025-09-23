@@ -49,10 +49,6 @@ class AIChatCog(commands.Cog):
             log.info(f"用户 {message.author.id} 在全局黑名单中，已跳过。")
             return
         
-        if not is_dm and await chat_db_manager.is_user_blacklisted(message.author.id, guild_id):
-            log.info(f"用户 {message.author.id} 在服务器 {guild_id} 的黑名单中，已跳过。")
-            return
-        
         if not is_dm and not is_mentioned:
             return
 

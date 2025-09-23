@@ -101,7 +101,7 @@ class MessageProcessor:
                     # 清理被回复消息的文本
                     ref_content_cleaned = self._clean_message_content(ref_msg.content, ref_msg.mentions, bot_user)
                     # 采用新的引用格式，以解决AI主语混淆问题
-                    replied_message_content = f'> 回复 @{ref_msg.author.display_name}: "{ref_content_cleaned}"\n\n'
+                    replied_message_content = f'> 回复 [{ref_msg.author.display_name}:{ref_content_cleaned}]\n\n'
                     
                     # 提取被回复消息中的图片
                     if ref_msg.attachments:

@@ -125,8 +125,16 @@ class PromptService:
                     
                     # 根据消息内容是否包含换行符（由 message_processor 添加，表示是引用回复）来决定格式
                     if '\n' in original_message:
-                        # 如果是回复，用户名和消息之间用换行符
-                        formatted_message = f"[{user_name}]:\n{original_message}"
+                        # 如果是回复，格式应为：引用回复部分\n\n[当前用户]:实际消息部分
+                        # original_message 已经包含了引用回复部分和实际消息部分，用 \n\n 分隔
+                        lines = original_message.split('\n\n', 1)
+                        if len(lines) == 2:
+                            # lines[0] 是引用回复部分，lines[1] 是实际消息部分
+                            # 我们需要在实际消息部分前加上 [当前用户]:
+                            formatted_message = f"{lines[0]}\n\n[{user_name}]:{lines[1]}"
+                        else:
+                            # 如果分割失败，使用原始逻辑
+                            formatted_message = f"[{user_name}]: {original_message}"
                     else:
                         # 如果是普通消息，则用冒号和空格
                         formatted_message = f"[{user_name}]: {original_message}"
