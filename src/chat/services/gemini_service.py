@@ -2,8 +2,9 @@
 
 import os
 import logging
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Callable, Any
 import asyncio
+from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 import json
 from datetime import datetime, timezone, timedelta
@@ -266,24 +267,93 @@ class GeminiService:
         
         return formatted
 
+    def _api_key_handler(func: Callable) -> Callable:
+        """
+        一个装饰器，用于优雅地处理 API 密钥的获取、释放和重试逻辑。
+        """
+        @wraps(func)
+        async def wrapper(self: 'GeminiService', *args, **kwargs):
+            max_retries = len(self.key_rotation_service.keys)
+            last_exception = None
+
+            for attempt in range(max_retries):
+                key_obj = None
+                try:
+                    # 1. 获取密钥和客户端
+                    key_obj = await self.key_rotation_service.acquire_key()
+                    client = self._create_client_with_key(key_obj.key)
+                    log.info(f"Attempt {attempt + 1}/{max_retries} using key ...{key_obj.key[-4:]} for {func.__name__}")
+
+                    # 2. 执行原始函数，并传入 client
+                    # 将 client 作为关键字参数传递，以便原始函数可以使用它
+                    result = await func(self, *args, client=client, **kwargs)
+                    
+                    # 3. 如果成功，释放密钥并返回结果
+                    await self.key_rotation_service.release_key(key_obj.key, success=True)
+                    log.debug(f"Key ...{key_obj.key[-4:]} released successfully after {func.__name__}.")
+                    return result
+
+                except (google_exceptions.ResourceExhausted, google_exceptions.ServiceUnavailable) as e:
+                    log.warning(f"Key ...{key_obj.key[-4:]} encountered a retryable error ({type(e).__name__}) for {func.__name__}. Retrying with another key. Details: {e}")
+                    last_exception = e
+                    if key_obj:
+                        await self.key_rotation_service.release_key(key_obj.key, success=False)
+                    continue # 继续下一次循环，尝试新密钥
+
+                except google_exceptions.PermissionDenied as e:
+                    log.error(f"Key ...{key_obj.key[-4:]} is invalid or has been revoked. Disabling it. Details: {e}")
+                    last_exception = e
+                    if key_obj:
+                        self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
+                    continue # 权限问题，必须换密钥
+
+                except NoAvailableKeyError as e:
+                    log.error("All API keys are currently unavailable. Cannot proceed.")
+                    last_exception = e
+                    # 所有密钥都不可用，直接中断并返回错误
+                    return "抱歉，所有AI通道似乎都已满负荷，请稍后再试。"
+                
+                except Exception as e:
+                    log.error(f"An unexpected error occurred in {func.__name__} with key ...{key_obj.key[-4:]}: {e}", exc_info=True)
+                    last_exception = e
+                    # 对于未知错误，也释放密钥（标记为成功以避免冷却），然后中断
+                    if key_obj:
+                        await self.key_rotation_service.release_key(key_obj.key, success=True)
+                    return "抱歉，类脑娘有些晕晕的，请稍后再试～ "
+                
+                finally:
+                    # 确保即使在未知异常下，如果 key_obj 存在但未被处理，也能被释放
+                    # 注意：上面的逻辑已经处理了大多数情况，这里是最后的保障
+                    pass
+
+            log.error(f"All {max_retries} keys failed for {func.__name__}. Last error: {last_exception}")
+            # 根据最后一个异常的类型返回更具体的消息
+            if isinstance(last_exception, (google_exceptions.ResourceExhausted, google_exceptions.ServiceUnavailable)):
+                return "类脑娘今天累啦,明天再来找她玩吧～"
+            elif isinstance(last_exception, google_exceptions.PermissionDenied):
+                return "抱歉，AI服务遇到一个无效的凭证，正在处理中，请稍后再试。"
+            return "抱歉，所有AI通道似乎都已满负荷，请稍后再试。"
+
+        return wrapper
+
+    @_api_key_handler
     async def generate_response(self, user_id: int, guild_id: int, message: str,
                                   images: Optional[List[Dict]] = None, user_name: str = "用户",
                                   channel_context: Optional[List[Dict]] = None,
                                   world_book_entries: Optional[List[Dict]] = None,
                                   personal_summary: Optional[str] = None,
-                                  cooldown_type: str = "default") -> str:
+                                  cooldown_type: str = "default", client: Any = None) -> str:
         """生成AI回复（已重构）。"""
         if not await self._check_and_update_cooldown(user_id, cooldown_type):
             return None
 
-        key_obj = None
-        try:
-            # 1. 从轮换服务获取一个可用密钥
-            key_obj = await self.key_rotation_service.acquire_key()
-            client = self._create_client_with_key(key_obj.key)
-            log.debug(f"为用户 {user_id} 获取到密钥 ...{key_obj.key[-4:]}")
+        # 装饰器会处理密钥和客户端的创建，这里我们直接使用
+        # 注意：装饰器会将 client 作为关键字参数注入
+        if not client:
+            raise ValueError("Decorator failed to provide a client.")
 
-            # 2. 构建完整的对话提示
+        try:
+            # 1. 构建完整的对话提示
             affection_status = await affection_service.get_affection_status(user_id, guild_id)
             final_conversation = prompt_service.build_chat_prompt(
                 user_name=user_name, message=message, images=images,
@@ -313,7 +383,7 @@ class GeminiService:
                 ))
                 log.info("------------------------------------")
             
-            # 4. 执行 API 调用
+            # 2. 执行 API 调用
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 self.executor,
@@ -324,7 +394,7 @@ class GeminiService:
                 )
             )
             
-            # 5. 处理响应
+            # 3. 处理响应
             if response.parts:
                 raw_ai_response = response.text.strip()
                 from src.chat.services.context_service import context_service
@@ -360,41 +430,21 @@ class GeminiService:
                 log.warning(f"未能为用户 {user_id} 生成有效回复。")
                 return "哎呀，我好像没太明白你的意思呢～可以再说清楚一点吗？✨"
 
-        except NoAvailableKeyError:
-            log.error("所有 API 密钥当前都不可用（冷却中或已禁用）。")
-            return "抱歉，所有AI通道似乎都已满负荷，请稍后再试。"
-        except google_exceptions.ResourceExhausted as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 遭遇配额错误 (429): {e}")
-            # 将此密钥标记为失败，以便进入冷却
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=False)
-                key_obj = None # 确保 finally 块不会再次释放它
-            return "类脑娘今天累啦,明天再来找她玩吧～"
-        except google_exceptions.PermissionDenied as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 无效或已被吊销: {e}")
-            if key_obj:
-                self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
-                key_obj = None
-            return "抱歉，AI服务遇到一个无效的凭证，正在处理中，请稍后再试。"
         except Exception as e:
-            log.error(f"生成AI回复时出现意外错误: {e}", exc_info=True)
-            return "抱歉，类脑娘有些晕晕的，请稍后再试～ "
-        finally:
-            # 6. 确保在使用后释放密钥
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=True)
-                log.debug(f"密钥 ...{key_obj.key[-4:]} 已成功释放。")
+            # 装饰器会处理API相关的异常，这里只捕获此方法内部的逻辑错误
+            log.error(f"在 generate_response 的核心逻辑中发生错误: {e}", exc_info=True)
+            # 返回一个通用错误，因为密钥处理已由装饰器完成
+            return "抱歉，处理您的请求时出现内部错误。"
 
-    async def generate_embedding(self, text: str, task_type: str = "retrieval_document", title: Optional[str] = None) -> Optional[List[float]]:
+    @_api_key_handler
+    async def generate_embedding(self, text: str, task_type: str = "retrieval_document", title: Optional[str] = None, client: Any = None) -> Optional[List[float]]:
         """
         为给定文本生成嵌入向量。
         """
-        key_obj = None
-        try:
-            key_obj = await self.key_rotation_service.acquire_key()
-            client = self._create_client_with_key(key_obj.key)
-            log.debug(f"为嵌入任务获取到密钥 ...{key_obj.key[-4:]}")
+        if not client:
+            raise ValueError("Decorator failed to provide a client.")
 
+        try:
             if not text or not text.strip():
                 log.warning(f"generate_embedding 接收到空文本！text: '{text}', task_type: '{task_type}'")
                 return None
@@ -416,30 +466,12 @@ class GeminiService:
             if embedding_result and embedding_result.embeddings:
                 return embedding_result.embeddings[0].values
             return None
-
-        except NoAvailableKeyError:
-            log.error("所有 API 密钥当前都不可用，无法生成嵌入。")
-            return None
-        except google_exceptions.ResourceExhausted as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 在生成嵌入时遭遇配额错误: {e}")
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=False)
-                key_obj = None
-            return None
-        except google_exceptions.PermissionDenied as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 无效或已被吊销: {e}")
-            if key_obj:
-                self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
-                key_obj = None
-            return None
         except Exception as e:
-            log.error(f"生成嵌入时出现意外错误: {e}", exc_info=True)
+            log.error(f"在 generate_embedding 的核心逻辑中发生错误: {e}", exc_info=True)
             return None
-        finally:
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=True)
 
-    async def generate_text(self, prompt: str, temperature: float = None, model_name: Optional[str] = None) -> Optional[str]:
+    @_api_key_handler
+    async def generate_text(self, prompt: str, temperature: float = None, model_name: Optional[str] = None, client: Any = None) -> Optional[str]:
         """
         一个用于简单文本生成的精简方法。
         不涉及对话历史或上下文，仅根据输入提示生成文本。
@@ -453,12 +485,10 @@ class GeminiService:
         Returns:
             生成的文本字符串，如果失败则返回 None。
         """
-        key_obj = None
+        if not client:
+            raise ValueError("Decorator failed to provide a client.")
+        
         try:
-            key_obj = await self.key_rotation_service.acquire_key()
-            client = self._create_client_with_key(key_obj.key)
-            log.debug(f"为 generate_text 任务获取到密钥 ...{key_obj.key[-4:]}")
-
             loop = asyncio.get_event_loop()
             gen_config_params = app_config.GEMINI_TEXT_GEN_CONFIG.copy()
             if temperature is not None:
@@ -481,30 +511,12 @@ class GeminiService:
             if response.parts:
                 return response.text.strip()
             return None
-
-        except NoAvailableKeyError:
-            log.error("所有 API 密钥当前都不可用，无法生成文本。")
-            return None
-        except google_exceptions.ResourceExhausted as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 在 generate_text 时遭遇配额错误: {e}")
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=False)
-                key_obj = None
-            return None
-        except google_exceptions.PermissionDenied as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 无效或已被吊销: {e}")
-            if key_obj:
-                self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
-                key_obj = None
-            return None
         except Exception as e:
-            log.error(f"generate_text 时出现意外错误: {e}", exc_info=True)
+            log.error(f"在 generate_text 的核心逻辑中发生错误: {e}", exc_info=True)
             return None
-        finally:
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=True)
 
-    async def generate_simple_response(self, prompt: str, generation_config: Dict, model_name: Optional[str] = None) -> Optional[str]:
+    @_api_key_handler
+    async def generate_simple_response(self, prompt: str, generation_config: Dict, model_name: Optional[str] = None, client: Any = None) -> Optional[str]:
         """
         一个用于单次、非对话式文本生成的方法，允许传入完整的生成配置和可选的模型名称。
         非常适合用于如“礼物回应”、“投喂”等需要自定义生成参数的一次性任务。
@@ -517,12 +529,10 @@ class GeminiService:
         Returns:
             生成的文本字符串，如果失败则返回 None。
         """
-        key_obj = None
-        try:
-            key_obj = await self.key_rotation_service.acquire_key()
-            client = self._create_client_with_key(key_obj.key)
-            log.debug(f"为 generate_simple_response 任务获取到密钥 ...{key_obj.key[-4:]}")
+        if not client:
+            raise ValueError("Decorator failed to provide a client.")
 
+        try:
             loop = asyncio.get_event_loop()
             gen_config = types.GenerateContentConfig(
                 **generation_config,
@@ -547,30 +557,12 @@ class GeminiService:
                 log.warning(f"请求可能被安全策略阻止，原因: {response.prompt_feedback.block_reason}")
             
             return None
-
-        except NoAvailableKeyError:
-            log.error("所有 API 密钥当前都不可用，无法生成文本。")
-            return None
-        except google_exceptions.ResourceExhausted as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 在 generate_simple_response 时遭遇配额错误: {e}")
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=False)
-                key_obj = None
-            return None
-        except google_exceptions.PermissionDenied as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 无效或已被吊销: {e}")
-            if key_obj:
-                self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
-                key_obj = None
-            return None
         except Exception as e:
-            log.error(f"generate_simple_response 时出现意外错误: {e}", exc_info=True)
+            log.error(f"在 generate_simple_response 的核心逻辑中发生错误: {e}", exc_info=True)
             return None
-        finally:
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=True)
 
-    async def generate_thread_praise(self, prompt: str) -> Optional[str]:
+    @_api_key_handler
+    async def generate_thread_praise(self, prompt: str, client: Any = None) -> Optional[str]:
         """
         专用于生成帖子夸奖的方法。
         使用独立的、为创意生成优化的配置。
@@ -581,12 +573,10 @@ class GeminiService:
         Returns:
             生成的夸奖文本，如果失败则返回 None。
         """
-        key_obj = None
-        try:
-            key_obj = await self.key_rotation_service.acquire_key()
-            client = self._create_client_with_key(key_obj.key)
-            log.debug(f"为 generate_thread_praise 任务获取到密钥 ...{key_obj.key[-4:]}")
+        if not client:
+            raise ValueError("Decorator failed to provide a client.")
 
+        try:
             loop = asyncio.get_event_loop()
             gen_config = types.GenerateContentConfig(
                 **app_config.GEMINI_THREAD_PRAISE_CONFIG,
@@ -611,28 +601,9 @@ class GeminiService:
                 log.warning(f"请求可能被安全策略阻止，原因: {response.prompt_feedback.block_reason}")
             
             return None
-
-        except NoAvailableKeyError:
-            log.error("所有 API 密钥当前都不可用，无法生成帖子夸奖。")
-            return None
-        except google_exceptions.ResourceExhausted as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 在 generate_thread_praise 时遭遇配额错误: {e}")
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=False)
-                key_obj = None
-            return None
-        except google_exceptions.PermissionDenied as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 无效或已被吊销: {e}")
-            if key_obj:
-                self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
-                key_obj = None
-            return None
         except Exception as e:
-            log.error(f"generate_thread_praise 时出现意外错误: {e}", exc_info=True)
+            log.error(f"在 generate_thread_praise 的核心逻辑中发生错误: {e}", exc_info=True)
             return None
-        finally:
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=True)
 
     async def summarize_for_rag(self, latest_query: str, user_name: str, conversation_history: Optional[List[Dict[str, any]]] = None) -> str:
         """
@@ -672,7 +643,8 @@ class GeminiService:
         """检查AI服务是否可用"""
         return self.key_rotation_service is not None
 
-    async def generate_text_with_image(self, prompt: str, image_bytes: bytes, mime_type: str) -> Optional[str]:
+    @_api_key_handler
+    async def generate_text_with_image(self, prompt: str, image_bytes: bytes, mime_type: str, client: Any = None) -> Optional[str]:
         """
         一个用于简单图文生成的精简方法。
         不涉及对话历史或上下文，仅根据输入提示和图片生成文本。
@@ -686,12 +658,10 @@ class GeminiService:
         Returns:
             生成的文本字符串，如果失败则返回 None。
         """
-        key_obj = None
-        try:
-            key_obj = await self.key_rotation_service.acquire_key()
-            client = self._create_client_with_key(key_obj.key)
-            log.debug(f"为 generate_text_with_image 任务获取到密钥 ...{key_obj.key[-4:]}")
+        if not client:
+            raise ValueError("Decorator failed to provide a client.")
 
+        try:
             loop = asyncio.get_event_loop()
             request_contents = [
                 prompt,
@@ -719,28 +689,9 @@ class GeminiService:
             
             log.warning(f"未能为图文生成有效回复。Response: {response}")
             return "我好像没看懂这张图里是什么，可以换一张或者稍后再试试吗？"
-
-        except NoAvailableKeyError:
-            log.error("所有 API 密钥当前都不可用，无法进行图文生成。")
-            return "抱歉，所有AI通道似乎都已满负荷，请稍后再试。"
-        except google_exceptions.ResourceExhausted as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 在图文生成时遭遇配额错误: {e}")
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=False)
-                key_obj = None
-            return None
-        except google_exceptions.PermissionDenied as e:
-            log.error(f"密钥 ...{key_obj.key[-4:]} 无效或已被吊销: {e}")
-            if key_obj:
-                self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
-                key_obj = None
-            return None
         except Exception as e:
-            log.error(f"图文生成时出现意外错误: {e}", exc_info=True)
+            log.error(f"在 generate_text_with_image 的核心逻辑中发生错误: {e}", exc_info=True)
             return "啊呀，处理图片的时候我好像有点晕...稍后再试试可以吗？"
-        finally:
-            if key_obj:
-                await self.key_rotation_service.release_key(key_obj.key, success=True)
 
 # 全局实例
 gemini_service = GeminiService()
