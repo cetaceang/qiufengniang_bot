@@ -41,38 +41,45 @@ class BlacklistAdminCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="封禁", description="将用户加入黑名单 (仅开发者可用)")
-    @app_commands.describe(user_id="要封禁的用户ID", duration_minutes="封禁时长(分钟)")
+    @app_commands.describe(user_id="要封禁的用户ID", duration_minutes="封禁时长(分钟)", global_ban="是否全局封禁 (默认否)")
     @app_commands.default_permissions(manage_guild=True)
     @is_developer()
-    async def blacklist_user(self, interaction: discord.Interaction, user_id: str, duration_minutes: int):
-        guild_id = interaction.guild.id if interaction.guild else 0
-        
+    async def blacklist_user(self, interaction: discord.Interaction, user_id: str, duration_minutes: int, global_ban: bool = False):
         try:
             target_user_id = int(user_id)
         except ValueError:
             await interaction.response.send_message("请输入有效的用户ID。", ephemeral=True)
             return
 
+        expires_at = datetime.utcnow() + timedelta(minutes=duration_minutes)
+        
         try:
-            if await chat_db_manager.is_user_blacklisted(target_user_id, guild_id):
-                await interaction.response.send_message(f"用户 <@{target_user_id}> 已经在黑名单中。", ephemeral=True)
-                return
-
-            expires_at = datetime.utcnow() + timedelta(minutes=duration_minutes)
-            await chat_db_manager.add_to_blacklist(target_user_id, guild_id, expires_at)
-            
-            await interaction.response.send_message(f"已将用户 <@{target_user_id}> 加入黑名单，时长 {duration_minutes} 分钟。", ephemeral=True)
-            log.info(f"开发者 {interaction.user} 将用户 {target_user_id} 加入黑名单，时长 {duration_minutes} 分钟。")
+            if global_ban:
+                # 全局封禁
+                if await chat_db_manager.is_user_globally_blacklisted(target_user_id):
+                    await interaction.response.send_message(f"用户 <@{target_user_id}> 已经在全局黑名单中。", ephemeral=True)
+                    return
+                await chat_db_manager.add_to_global_blacklist(target_user_id, expires_at)
+                await interaction.response.send_message(f"已将用户 <@{target_user_id}> 加入全局黑名单，时长 {duration_minutes} 分钟。", ephemeral=True)
+                log.info(f"开发者 {interaction.user} 将用户 {target_user_id} 加入全局黑名单，时长 {duration_minutes} 分钟。")
+            else:
+                # 服务器封禁
+                guild_id = interaction.guild.id if interaction.guild else 0
+                if await chat_db_manager.is_user_blacklisted(target_user_id, guild_id):
+                    await interaction.response.send_message(f"用户 <@{target_user_id}> 已经在当前服务器的黑名单中。", ephemeral=True)
+                    return
+                await chat_db_manager.add_to_blacklist(target_user_id, guild_id, expires_at)
+                await interaction.response.send_message(f"已将用户 <@{target_user_id}> 加入当前服务器的黑名单，时长 {duration_minutes} 分钟。", ephemeral=True)
+                log.info(f"开发者 {interaction.user} 将用户 {target_user_id} 加入服务器 {guild_id} 的黑名单，时长 {duration_minutes} 分钟。")
         except Exception as e:
             log.error(f"封禁用户时出错: {e}", exc_info=True)
             await interaction.response.send_message("封禁用户时发生错误，请检查日志。", ephemeral=True)
 
     @app_commands.command(name="解封", description="将用户从黑名单中移除 (仅开发者可用)")
-    @app_commands.describe(user_id="要解封的用户ID")
+    @app_commands.describe(user_id="要解封的用户ID", global_ban="是否从全局黑名单解封 (默认否)")
     @app_commands.default_permissions(manage_guild=True)
     @is_developer()
-    async def unblacklist_user(self, interaction: discord.Interaction, user_id: str):
-        guild_id = interaction.guild.id if interaction.guild else 0
+    async def unblacklist_user(self, interaction: discord.Interaction, user_id: str, global_ban: bool = False):
         try:
             target_user_id = int(user_id)
         except ValueError:
@@ -80,13 +87,23 @@ class BlacklistAdminCog(commands.Cog):
             return
             
         try:
-            if not await chat_db_manager.is_user_blacklisted(target_user_id, guild_id):
-                await interaction.response.send_message(f"用户 <@{target_user_id}> 不在黑名单中。", ephemeral=True)
-                return
-
-            await chat_db_manager.remove_from_blacklist(target_user_id, guild_id)
-            await interaction.response.send_message(f"已将用户 <@{target_user_id}> 从黑名单中移除。", ephemeral=True)
-            log.info(f"开发者 {interaction.user} 将用户 {target_user_id} 从黑名单中移除。")
+            if global_ban:
+                # 全局解封
+                if not await chat_db_manager.is_user_globally_blacklisted(target_user_id):
+                    await interaction.response.send_message(f"用户 <@{target_user_id}> 不在全局黑名单中。", ephemeral=True)
+                    return
+                await chat_db_manager.remove_from_global_blacklist(target_user_id)
+                await interaction.response.send_message(f"已将用户 <@{target_user_id}> 从全局黑名单中移除。", ephemeral=True)
+                log.info(f"开发者 {interaction.user} 将用户 {target_user_id} 从全局黑名单中移除。")
+            else:
+                # 服务器解封
+                guild_id = interaction.guild.id if interaction.guild else 0
+                if not await chat_db_manager.is_user_blacklisted(target_user_id, guild_id):
+                    await interaction.response.send_message(f"用户 <@{target_user_id}> 不在当前服务器的黑名单中。", ephemeral=True)
+                    return
+                await chat_db_manager.remove_from_blacklist(target_user_id, guild_id)
+                await interaction.response.send_message(f"已将用户 <@{target_user_id}> 从当前服务器的黑名单中移除。", ephemeral=True)
+                log.info(f"开发者 {interaction.user} 将用户 {target_user_id} 从服务器 {guild_id} 的黑名单中移除。")
         except Exception as e:
             log.error(f"解封用户时出错: {e}", exc_info=True)
             await interaction.response.send_message("解封用户时发生错误，请检查日志。", ephemeral=True)

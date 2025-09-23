@@ -102,6 +102,14 @@ class ChatDatabaseManager:
                     PRIMARY KEY (user_id, guild_id)
                 );
             """)
+            
+            # --- 全局黑名单表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS globally_blacklisted_users (
+                    user_id INTEGER PRIMARY KEY,
+                    expires_at TIMESTAMP NOT NULL
+                );
+            """)
                  
             # --- AI好感度表 ---
             cursor.execute("""
@@ -404,6 +412,44 @@ class ChatDatabaseManager:
                 return False
         
         log.info(f"用户 {user_id} 不在服务器 {guild_id} 的黑名单中。")
+        return False
+
+    # --- 全局黑名单管理 ---
+    async def add_to_global_blacklist(self, user_id: int, expires_at: datetime) -> None:
+        """将用户添加到全局黑名单。"""
+        query = """
+            INSERT INTO globally_blacklisted_users (user_id, expires_at)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                expires_at = excluded.expires_at;
+        """
+        await self._execute(self._db_transaction, query, (user_id, expires_at), commit=True)
+        log.info(f"已将用户 {user_id} 添加到全局黑名单，到期时间: {expires_at}")
+
+    async def remove_from_global_blacklist(self, user_id: int) -> None:
+        """将用户从全局黑名单中移除。"""
+        query = "DELETE FROM globally_blacklisted_users WHERE user_id = ?"
+        await self._execute(self._db_transaction, query, (user_id,), commit=True)
+        log.info(f"已将用户 {user_id} 从全局黑名单中移除")
+
+    async def is_user_globally_blacklisted(self, user_id: int) -> bool:
+        """检查用户是否在全局黑名单中。"""
+        await self._execute(self._db_transaction, "DELETE FROM globally_blacklisted_users WHERE expires_at < datetime('now', 'utc')", commit=True)
+        
+        query = "SELECT expires_at FROM globally_blacklisted_users WHERE user_id = ?"
+        result = await self._execute(self._db_transaction, query, (user_id,), fetch="one")
+        
+        if result:
+            try:
+                db_expires_at = datetime.fromisoformat(result['expires_at']).replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                # 兼容旧格式或None值
+                db_expires_at = datetime.strptime(result['expires_at'], "%Y-%m-%d %H:%M:%S.%f").replace(tzinfo=timezone.utc)
+
+            if db_expires_at > datetime.now(timezone.utc):
+                log.info(f"用户 {user_id} 仍在全局黑名单中。")
+                return True
+        
         return False
 
     # --- 好感度管理 ---
