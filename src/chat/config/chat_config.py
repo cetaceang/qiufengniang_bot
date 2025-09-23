@@ -101,7 +101,7 @@ FEEDING_CONFIG = {
 
 # --- 忏悔功能 ---
 CONFESSION_CONFIG = {
-    "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1418576178326802524/3_632830043818943_00001_.png" # 忏悔回应的默认图片URL
+    "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1419992658067325008/3_1124796593853479_00001_.png" # 忏悔回应的默认图片URL
 }
 
 # --- 类脑币系统 ---
