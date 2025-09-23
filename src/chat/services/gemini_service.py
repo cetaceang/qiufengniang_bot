@@ -311,15 +311,17 @@ class GeminiService:
                     log.error("All API keys are currently unavailable. Cannot proceed.")
                     last_exception = e
                     # 所有密钥都不可用，直接中断并返回错误
-                    return "抱歉，所有AI通道似乎都已满负荷，请稍后再试。"
+                    # 所有密钥都不可用，直接中断并返回 None
+                    return None
                 
                 except Exception as e:
-                    log.error(f"An unexpected error occurred in {func.__name__} with key ...{key_obj.key[-4:]}: {e}", exc_info=True)
+                    log.error(f"An unexpected error occurred within the API call of {func.__name__} with key ...{key_obj.key[-4:]}: {e}", exc_info=True)
                     last_exception = e
                     # 对于未知错误，也释放密钥（标记为成功以避免冷却），然后中断
                     if key_obj:
                         await self.key_rotation_service.release_key(key_obj.key, success=True)
-                    return "抱歉，类脑娘有些晕晕的，请稍后再试～ "
+                    # 发生未知API错误，中断并返回 None
+                    return None
                 
                 finally:
                     # 确保即使在未知异常下，如果 key_obj 存在但未被处理，也能被释放
@@ -327,12 +329,8 @@ class GeminiService:
                     pass
 
             log.error(f"All {max_retries} keys failed for {func.__name__}. Last error: {last_exception}")
-            # 根据最后一个异常的类型返回更具体的消息
-            if isinstance(last_exception, (google_exceptions.ResourceExhausted, google_exceptions.ServiceUnavailable)):
-                return "类脑娘今天累啦,明天再来找她玩吧～"
-            elif isinstance(last_exception, google_exceptions.PermissionDenied):
-                return "抱歉，AI服务遇到一个无效的凭证，正在处理中，请稍后再试。"
-            return "抱歉，所有AI通道似乎都已满负荷，请稍后再试。"
+            # 在所有尝试失败后，返回 None
+            return None
 
         return wrapper
 
@@ -383,7 +381,7 @@ class GeminiService:
                 ))
                 log.info("------------------------------------")
             
-            # 2. 执行 API 调用
+            # 2. 执行 API 调用 (此部分错误由装饰器处理)
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 self.executor,
@@ -429,12 +427,10 @@ class GeminiService:
             else:
                 log.warning(f"未能为用户 {user_id} 生成有效回复。")
                 return "哎呀，我好像没太明白你的意思呢～可以再说清楚一点吗？✨"
-
         except Exception as e:
-            # 装饰器会处理API相关的异常，这里只捕获此方法内部的逻辑错误
+            # 这个块现在只捕获此方法内部的逻辑错误，而不是API错误
             log.error(f"在 generate_response 的核心逻辑中发生错误: {e}", exc_info=True)
-            # 返回一个通用错误，因为密钥处理已由装饰器完成
-            return "抱歉，处理您的请求时出现内部错误。"
+            return None # 返回 None 以符合失败约定
 
     @_api_key_handler
     async def generate_embedding(self, text: str, task_type: str = "retrieval_document", title: Optional[str] = None, client: Any = None) -> Optional[List[float]]:
@@ -691,7 +687,7 @@ class GeminiService:
             return "我好像没看懂这张图里是什么，可以换一张或者稍后再试试吗？"
         except Exception as e:
             log.error(f"在 generate_text_with_image 的核心逻辑中发生错误: {e}", exc_info=True)
-            return "啊呀，处理图片的时候我好像有点晕...稍后再试试可以吗？"
+            return None
 
 # 全局实例
 gemini_service = GeminiService()
