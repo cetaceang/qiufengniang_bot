@@ -40,7 +40,7 @@ class ConfessionService:
                     cooldown_message = f"{hours}小时{minutes}分钟"
                 else:
                     cooldown_message = f"{minutes}分钟"
-                return False, f"你的忏悔太频繁了, **{cooldown_message}** 后再来吧！"
+                return False, f"你的忏悔太频繁了，请在 **{cooldown_message}** 后再来吧！"
 
         # 2. 检查今天（北京时间）的忏悔次数
         start_of_today_utc = get_start_of_today_utc()

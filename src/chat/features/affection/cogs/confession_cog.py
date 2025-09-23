@@ -21,15 +21,15 @@ class ConfessionCog(commands.Cog):
     @app_commands.rename(content='忏悔内容')
     @app_commands.describe(content='写下你的忏悔内容。')
     async def confess(self, interaction: discord.Interaction, content: str):
-        await interaction.response.defer()
-        
         user_id = str(interaction.user.id)
         guild_id = str(interaction.guild.id)
 
         can_confess, remaining_time = await self.confession_service.can_confess(user_id)
         if not can_confess:
-            await interaction.followup.send(f"忏悔冷却中，请在 {remaining_time} 后再试。", ephemeral=True)
+            await interaction.response.send_message(f"{remaining_time}", ephemeral=True)
             return
+
+        await interaction.response.defer()
 
         try:
             affection_status = await self.affection_service.get_affection_status(user_id, guild_id)
