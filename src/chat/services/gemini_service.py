@@ -293,44 +293,49 @@ class GeminiService:
                     log.debug(f"Key ...{key_obj.key[-4:]} released successfully after {func.__name__}.")
                     return result
 
-                except (google_exceptions.ResourceExhausted, google_exceptions.ServiceUnavailable) as e:
-                    log.warning(f"Key ...{key_obj.key[-4:]} encountered a retryable error ({type(e).__name__}) for {func.__name__}. Retrying with another key. Details: {e}")
-                    last_exception = e
-                    if key_obj:
-                        await self.key_rotation_service.release_key(key_obj.key, success=False)
-                    continue # 继续下一次循环，尝试新密钥
-
-                except google_exceptions.PermissionDenied as e:
-                    log.error(f"Key ...{key_obj.key[-4:]} is invalid or has been revoked. Disabling it. Details: {e}")
-                    last_exception = e
-                    if key_obj:
-                        self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
-                    continue # 权限问题，必须换密钥
+                except genai_errors.ClientError as e:
+                    # 根据日志，google-genai 库会抛出 ClientError
+                    # 检查 status_code 来判断是否是可重试的错误
+                    # 常见的可重试状态码：429 (Resource Exhausted), 503 (Service Unavailable)
+                    if hasattr(e, 'status_code') and e.status_code in [429, 503]:
+                        log.warning(f"Key ...{key_obj.key[-4:]} encountered a retryable error (Status: {e.status_code}) for {func.__name__}. Retrying with another key. Details: {e}")
+                        last_exception = e
+                        if key_obj:
+                            await self.key_rotation_service.release_key(key_obj.key, success=False)
+                        continue  # 继续下一次循环，尝试新密钥
+                    # 检查是否是权限错误
+                    elif hasattr(e, 'status_code') and e.status_code == 403:
+                        log.error(f"Key ...{key_obj.key[-4:]} is invalid or has been revoked (Permission Denied). Disabling it. Details: {e}")
+                        last_exception = e
+                        if key_obj:
+                            self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
+                        continue  # 权限问题，必须换密钥
+                    else:
+                        # 对于其他 ClientError，我们认为它们是不可重试的
+                        log.error(f"An unexpected but fatal ClientError occurred with key ...{key_obj.key[-4:]}: {e}", exc_info=True)
+                        last_exception = e
+                        if key_obj:
+                            await self.key_rotation_service.release_key(key_obj.key, success=True)
+                        # 发生未知API错误，中断并返回用户提示
+                        return "抱歉，AI服务遇到了一个意料之外的错误，请稍后再试。"
 
                 except NoAvailableKeyError as e:
                     log.error("All API keys are currently unavailable. Cannot proceed.")
                     last_exception = e
-                    # 所有密钥都不可用，直接中断并返回错误
-                    # 所有密钥都不可用，直接中断并返回 None
-                    return None
+                    # 所有密钥都不可用，直接中断并返回用户提示
+                    return "抱歉，我们的AI服务暂时过载，请稍后再试。"
                 
                 except Exception as e:
                     log.error(f"An unexpected error occurred within the API call of {func.__name__} with key ...{key_obj.key[-4:]}: {e}", exc_info=True)
                     last_exception = e
-                    # 对于未知错误，也释放密钥（标记为成功以避免冷却），然后中断
                     if key_obj:
                         await self.key_rotation_service.release_key(key_obj.key, success=True)
-                    # 发生未知API错误，中断并返回 None
-                    return None
+                    # 发生未知API错误，中断并返回用户提示
+                    return "抱歉，AI服务遇到了一个内部错误，请稍后再试。"
                 
-                finally:
-                    # 确保即使在未知异常下，如果 key_obj 存在但未被处理，也能被释放
-                    # 注意：上面的逻辑已经处理了大多数情况，这里是最后的保障
-                    pass
-
             log.error(f"All {max_retries} keys failed for {func.__name__}. Last error: {last_exception}")
-            # 在所有尝试失败后，返回 None
-            return None
+            # 在所有尝试失败后，返回一个明确的错误消息给用户
+            return "抱歉，我们的AI服务暂时过载，请稍后再试。"
 
         return wrapper
 
@@ -350,87 +355,83 @@ class GeminiService:
         if not client:
             raise ValueError("Decorator failed to provide a client.")
 
-        try:
-            # 1. 构建完整的对话提示
-            affection_status = await affection_service.get_affection_status(user_id, guild_id)
-            final_conversation = prompt_service.build_chat_prompt(
-                user_name=user_name, message=message, images=images,
-                channel_context=channel_context, world_book_entries=world_book_entries,
-                affection_status=affection_status, personal_summary=personal_summary
-            )
-            
-            # 3. 准备 API 调用参数
-            chat_config = app_config.GEMINI_CHAT_CONFIG.copy()
-            thinking_budget = chat_config.pop("thinking_budget", None)
-            gen_config = types.GenerateContentConfig(
-                **chat_config,
-                safety_settings=self.safety_settings
-            )
-            if thinking_budget is not None:
-                gen_config.thinking_config = types.ThinkingConfig(thinking_budget=thinking_budget)
-            
-            processed_contents = self._prepare_api_contents(final_conversation)
+        # 移除外层 try...except，让异常传递给装饰器
+        # 1. 构建完整的对话提示
+        affection_status = await affection_service.get_affection_status(user_id, guild_id)
+        final_conversation = prompt_service.build_chat_prompt(
+            user_name=user_name, message=message, images=images,
+            channel_context=channel_context, world_book_entries=world_book_entries,
+            affection_status=affection_status, personal_summary=personal_summary
+        )
+        
+        # 3. 准备 API 调用参数
+        chat_config = app_config.GEMINI_CHAT_CONFIG.copy()
+        thinking_budget = chat_config.pop("thinking_budget", None)
+        gen_config = types.GenerateContentConfig(
+            **chat_config,
+            safety_settings=self.safety_settings
+        )
+        if thinking_budget is not None:
+            gen_config.thinking_config = types.ThinkingConfig(thinking_budget=thinking_budget)
+        
+        processed_contents = self._prepare_api_contents(final_conversation)
 
-            # 如果开启了 AI 完整上下文日志，则打印到终端
-            if app_config.DEBUG_CONFIG["LOG_AI_FULL_CONTEXT"]:
-                log.info(f"--- AI 完整上下文日志 (用户 {user_id}) ---")
-                log.info(json.dumps(
-                    [self._serialize_parts_for_logging_full(content) for content in processed_contents],
+        # 如果开启了 AI 完整上下文日志，则打印到终端
+        if app_config.DEBUG_CONFIG["LOG_AI_FULL_CONTEXT"]:
+            log.info(f"--- AI 完整上下文日志 (用户 {user_id}) ---")
+            log.info(json.dumps(
+                [self._serialize_parts_for_logging_full(content) for content in processed_contents],
+                ensure_ascii=False,
+                indent=2
+            ))
+            log.info("------------------------------------")
+        
+        # 2. 执行 API 调用 (此部分错误由装饰器处理)
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            self.executor,
+            lambda: client.models.generate_content(
+                model=self.model_name,
+                contents=processed_contents,
+                config=gen_config
+            )
+        )
+        
+        # 3. 处理响应
+        if response.parts:
+            raw_ai_response = response.text.strip()
+            from src.chat.services.context_service import context_service
+            await context_service.update_user_conversation_history(
+                user_id, guild_id, message if message else "", raw_ai_response
+            )
+            formatted_response = await self._post_process_response(raw_ai_response, user_id, guild_id)
+            return formatted_response
+        
+        elif response.prompt_feedback and response.prompt_feedback.block_reason:
+            # --- 增强日志记录 ---
+            try:
+                # 尝试序列化整个对话历史和响应以进行调试
+                conversation_for_log = json.dumps(
+                    GeminiService._serialize_for_logging(final_conversation),
                     ensure_ascii=False,
                     indent=2
-                ))
-                log.info("------------------------------------")
-            
-            # 2. 执行 API 调用 (此部分错误由装饰器处理)
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                self.executor,
-                lambda: client.models.generate_content(
-                    model=self.model_name,
-                    contents=processed_contents,
-                    config=gen_config
                 )
-            )
-            
-            # 3. 处理响应
-            if response.parts:
-                raw_ai_response = response.text.strip()
-                from src.chat.services.context_service import context_service
-                await context_service.update_user_conversation_history(
-                    user_id, guild_id, message if message else "", raw_ai_response
+                full_response_for_log = str(response)
+                log.warning(
+                    f"用户 {user_id} 的请求被安全策略阻止，原因: {response.prompt_feedback.block_reason}\n"
+                    f"--- 完整的对话历史 ---\n{conversation_for_log}\n"
+                    f"--- 完整的 API 响应 ---\n{full_response_for_log}"
                 )
-                formatted_response = await self._post_process_response(raw_ai_response, user_id, guild_id)
-                return formatted_response
-            
-            elif response.prompt_feedback and response.prompt_feedback.block_reason:
-                # --- 增强日志记录 ---
-                try:
-                    # 尝试序列化整个对话历史和响应以进行调试
-                    conversation_for_log = json.dumps(
-                        GeminiService._serialize_for_logging(final_conversation),
-                        ensure_ascii=False,
-                        indent=2
-                    )
-                    full_response_for_log = str(response)
-                    log.warning(
-                        f"用户 {user_id} 的请求被安全策略阻止，原因: {response.prompt_feedback.block_reason}\n"
-                        f"--- 完整的对话历史 ---\n{conversation_for_log}\n"
-                        f"--- 完整的 API 响应 ---\n{full_response_for_log}"
-                    )
-                except Exception as log_e:
-                    log.error(f"序列化被阻止的请求用于日志记录时出错: {log_e}")
-                    # 即使序列化失败，也记录基本信息
-                    log.warning(f"用户 {user_id} 的请求被安全策略阻止，原因: {response.prompt_feedback.block_reason} (详细内容记录失败)")
+            except Exception as log_e:
+                log.error(f"序列化被阻止的请求用于日志记录时出错: {log_e}")
+                # 即使序列化失败，也记录基本信息
+                log.warning(f"用户 {user_id} 的请求被安全策略阻止，原因: {response.prompt_feedback.block_reason} (详细内容记录失败)")
 
-                return "呜啊! 这个太色情啦,我不看我不看"
-            
-            else:
-                log.warning(f"未能为用户 {user_id} 生成有效回复。")
-                return "哎呀，我好像没太明白你的意思呢～可以再说清楚一点吗？✨"
-        except Exception as e:
-            # 这个块现在只捕获此方法内部的逻辑错误，而不是API错误
-            log.error(f"在 generate_response 的核心逻辑中发生错误: {e}", exc_info=True)
-            return None # 返回 None 以符合失败约定
+            return "呜啊! 这个太色情啦,我不看我不看"
+        
+        else:
+            log.warning(f"未能为用户 {user_id} 生成有效回复。")
+            return "哎呀，我好像没太明白你的意思呢～可以再说清楚一点吗？✨"
 
     @_api_key_handler
     async def generate_embedding(self, text: str, task_type: str = "retrieval_document", title: Optional[str] = None, client: Any = None) -> Optional[List[float]]:
@@ -440,31 +441,27 @@ class GeminiService:
         if not client:
             raise ValueError("Decorator failed to provide a client.")
 
-        try:
-            if not text or not text.strip():
-                log.warning(f"generate_embedding 接收到空文本！text: '{text}', task_type: '{task_type}'")
-                return None
+        if not text or not text.strip():
+            log.warning(f"generate_embedding 接收到空文本！text: '{text}', task_type: '{task_type}'")
+            return None
 
-            loop = asyncio.get_event_loop()
-            embed_config = types.EmbedContentConfig(task_type=task_type)
-            if title and task_type == "retrieval_document":
-                embed_config.title = title
+        loop = asyncio.get_event_loop()
+        embed_config = types.EmbedContentConfig(task_type=task_type)
+        if title and task_type == "retrieval_document":
+            embed_config.title = title
 
-            embedding_result = await loop.run_in_executor(
-                self.executor,
-                lambda: client.models.embed_content(
-                    model="gemini-embedding-001",
-                    contents=[types.Part(text=text)],
-                    config=embed_config
-                )
+        embedding_result = await loop.run_in_executor(
+            self.executor,
+            lambda: client.models.embed_content(
+                model="gemini-embedding-001",
+                contents=[types.Part(text=text)],
+                config=embed_config
             )
-            
-            if embedding_result and embedding_result.embeddings:
-                return embedding_result.embeddings[0].values
-            return None
-        except Exception as e:
-            log.error(f"在 generate_embedding 的核心逻辑中发生错误: {e}", exc_info=True)
-            return None
+        )
+        
+        if embedding_result and embedding_result.embeddings:
+            return embedding_result.embeddings[0].values
+        return None
 
     @_api_key_handler
     async def generate_text(self, prompt: str, temperature: float = None, model_name: Optional[str] = None, client: Any = None) -> Optional[str]:
@@ -484,32 +481,28 @@ class GeminiService:
         if not client:
             raise ValueError("Decorator failed to provide a client.")
         
-        try:
-            loop = asyncio.get_event_loop()
-            gen_config_params = app_config.GEMINI_TEXT_GEN_CONFIG.copy()
-            if temperature is not None:
-                gen_config_params["temperature"] = temperature
-            gen_config = types.GenerateContentConfig(
-                **gen_config_params,
-                safety_settings=self.safety_settings
-            )
-            final_model_name = model_name or self.model_name
+        loop = asyncio.get_event_loop()
+        gen_config_params = app_config.GEMINI_TEXT_GEN_CONFIG.copy()
+        if temperature is not None:
+            gen_config_params["temperature"] = temperature
+        gen_config = types.GenerateContentConfig(
+            **gen_config_params,
+            safety_settings=self.safety_settings
+        )
+        final_model_name = model_name or self.model_name
 
-            response = await loop.run_in_executor(
-                self.executor,
-                lambda: client.models.generate_content(
-                    model=final_model_name,
-                    contents=[prompt],
-                    config=gen_config
-                )
+        response = await loop.run_in_executor(
+            self.executor,
+            lambda: client.models.generate_content(
+                model=final_model_name,
+                contents=[prompt],
+                config=gen_config
             )
+        )
 
-            if response.parts:
-                return response.text.strip()
-            return None
-        except Exception as e:
-            log.error(f"在 generate_text 的核心逻辑中发生错误: {e}", exc_info=True)
-            return None
+        if response.parts:
+            return response.text.strip()
+        return None
 
     @_api_key_handler
     async def generate_simple_response(self, prompt: str, generation_config: Dict, model_name: Optional[str] = None, client: Any = None) -> Optional[str]:
@@ -528,34 +521,30 @@ class GeminiService:
         if not client:
             raise ValueError("Decorator failed to provide a client.")
 
-        try:
-            loop = asyncio.get_event_loop()
-            gen_config = types.GenerateContentConfig(
-                **generation_config,
-                safety_settings=self.safety_settings
-            )
-            final_model_name = model_name or self.model_name
+        loop = asyncio.get_event_loop()
+        gen_config = types.GenerateContentConfig(
+            **generation_config,
+            safety_settings=self.safety_settings
+        )
+        final_model_name = model_name or self.model_name
 
-            response = await loop.run_in_executor(
-                self.executor,
-                lambda: client.models.generate_content(
-                    model=final_model_name,
-                    contents=[prompt],
-                    config=gen_config
-                )
+        response = await loop.run_in_executor(
+            self.executor,
+            lambda: client.models.generate_content(
+                model=final_model_name,
+                contents=[prompt],
+                config=gen_config
             )
+        )
 
-            if response.parts:
-                return response.text.strip()
-            
-            log.warning(f"generate_simple_response 未能生成有效内容。API 响应: {response}")
-            if response.prompt_feedback and response.prompt_feedback.block_reason:
-                log.warning(f"请求可能被安全策略阻止，原因: {response.prompt_feedback.block_reason}")
-            
-            return None
-        except Exception as e:
-            log.error(f"在 generate_simple_response 的核心逻辑中发生错误: {e}", exc_info=True)
-            return None
+        if response.parts:
+            return response.text.strip()
+        
+        log.warning(f"generate_simple_response 未能生成有效内容。API 响应: {response}")
+        if response.prompt_feedback and response.prompt_feedback.block_reason:
+            log.warning(f"请求可能被安全策略阻止，原因: {response.prompt_feedback.block_reason}")
+        
+        return None
 
     @_api_key_handler
     async def generate_thread_praise(self, prompt: str, client: Any = None) -> Optional[str]:
@@ -572,34 +561,30 @@ class GeminiService:
         if not client:
             raise ValueError("Decorator failed to provide a client.")
 
-        try:
-            loop = asyncio.get_event_loop()
-            gen_config = types.GenerateContentConfig(
-                **app_config.GEMINI_THREAD_PRAISE_CONFIG,
-                safety_settings=self.safety_settings
-            )
-            final_model_name = self.model_name
+        loop = asyncio.get_event_loop()
+        gen_config = types.GenerateContentConfig(
+            **app_config.GEMINI_THREAD_PRAISE_CONFIG,
+            safety_settings=self.safety_settings
+        )
+        final_model_name = self.model_name
 
-            response = await loop.run_in_executor(
-                self.executor,
-                lambda: client.models.generate_content(
-                    model=final_model_name,
-                    contents=[prompt],
-                    config=gen_config
-                )
+        response = await loop.run_in_executor(
+            self.executor,
+            lambda: client.models.generate_content(
+                model=final_model_name,
+                contents=[prompt],
+                config=gen_config
             )
+        )
 
-            if response.parts:
-                return response.text.strip()
-            
-            log.warning(f"generate_thread_praise 未能生成有效内容。API 响应: {response}")
-            if response.prompt_feedback and response.prompt_feedback.block_reason:
-                log.warning(f"请求可能被安全策略阻止，原因: {response.prompt_feedback.block_reason}")
-            
-            return None
-        except Exception as e:
-            log.error(f"在 generate_thread_praise 的核心逻辑中发生错误: {e}", exc_info=True)
-            return None
+        if response.parts:
+            return response.text.strip()
+        
+        log.warning(f"generate_thread_praise 未能生成有效内容。API 响应: {response}")
+        if response.prompt_feedback and response.prompt_feedback.block_reason:
+            log.warning(f"请求可能被安全策略阻止，原因: {response.prompt_feedback.block_reason}")
+        
+        return None
 
     async def summarize_for_rag(self, latest_query: str, user_name: str, conversation_history: Optional[List[Dict[str, any]]] = None) -> str:
         """
@@ -657,37 +642,33 @@ class GeminiService:
         if not client:
             raise ValueError("Decorator failed to provide a client.")
 
-        try:
-            loop = asyncio.get_event_loop()
-            request_contents = [
-                prompt,
-                types.Part(inline_data=types.Blob(mime_type=mime_type, data=image_bytes))
-            ]
-            gen_config = types.GenerateContentConfig(
-                **app_config.GEMINI_VISION_GEN_CONFIG,
-                safety_settings=self.safety_settings
-            )
+        loop = asyncio.get_event_loop()
+        request_contents = [
+            prompt,
+            types.Part(inline_data=types.Blob(mime_type=mime_type, data=image_bytes))
+        ]
+        gen_config = types.GenerateContentConfig(
+            **app_config.GEMINI_VISION_GEN_CONFIG,
+            safety_settings=self.safety_settings
+        )
 
-            response = await loop.run_in_executor(
-                self.executor,
-                lambda: client.models.generate_content(
-                    model=self.model_name,
-                    contents=request_contents,
-                    config=gen_config
-                )
+        response = await loop.run_in_executor(
+            self.executor,
+            lambda: client.models.generate_content(
+                model=self.model_name,
+                contents=request_contents,
+                config=gen_config
             )
+        )
 
-            if response.parts:
-                return response.text.strip()
-            elif response.prompt_feedback and response.prompt_feedback.block_reason:
-                log.warning(f"图文生成请求被安全策略阻止: {response.prompt_feedback.block_reason}")
-                return "这张图片似乎触发了我的安全警报，我没法评价它呢。换一张试试看？"
-            
-            log.warning(f"未能为图文生成有效回复。Response: {response}")
-            return "我好像没看懂这张图里是什么，可以换一张或者稍后再试试吗？"
-        except Exception as e:
-            log.error(f"在 generate_text_with_image 的核心逻辑中发生错误: {e}", exc_info=True)
-            return None
+        if response.parts:
+            return response.text.strip()
+        elif response.prompt_feedback and response.prompt_feedback.block_reason:
+            log.warning(f"图文生成请求被安全策略阻止: {response.prompt_feedback.block_reason}")
+            return "这张图片似乎触发了我的安全警报，我没法评价它呢。换一张试试看？"
+        
+        log.warning(f"未能为图文生成有效回复。Response: {response}")
+        return "我好像没看懂这张图里是什么，可以换一张或者稍后再试试吗？"
 
 # 全局实例
 gemini_service = GeminiService()
