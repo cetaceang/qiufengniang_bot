@@ -294,25 +294,28 @@ class GeminiService:
                     return result
 
                 except genai_errors.ClientError as e:
-                    # 根据日志，google-genai 库会抛出 ClientError
-                    # 检查 status_code 来判断是否是可重试的错误
-                    # 常见的可重试状态码：429 (Resource Exhausted), 503 (Service Unavailable)
-                    if hasattr(e, 'status_code') and e.status_code in [429, 503]:
-                        log.warning(f"Key ...{key_obj.key[-4:]} encountered a retryable error (Status: {e.status_code}) for {func.__name__}. Retrying with another key. Details: {e}")
+                    # --- 修复：从异常字符串中可靠地解析状态码 ---
+                    error_str = str(e)
+                    match = re.match(r"(\d{3})", error_str)
+                    status_code = int(match.group(1)) if match else None
+
+                    if status_code in [429, 503]:
+                        log.warning(f"Key ...{key_obj.key[-4:]} encountered a retryable error (Status: {status_code}) for {func.__name__}. Retrying with another key. Details: {e}")
                         last_exception = e
                         if key_obj:
                             await self.key_rotation_service.release_key(key_obj.key, success=False)
                         continue  # 继续下一次循环，尝试新密钥
-                    # 检查是否是权限错误
-                    elif hasattr(e, 'status_code') and e.status_code == 403:
-                        log.error(f"Key ...{key_obj.key[-4:]} is invalid or has been revoked (Permission Denied). Disabling it. Details: {e}")
+                    
+                    elif status_code == 403:
+                        log.error(f"Key ...{key_obj.key[-4:]} is invalid or has been revoked (Permission Denied, Status: 403). Disabling it. Details: {e}")
                         last_exception = e
                         if key_obj:
                             self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
                         continue  # 权限问题，必须换密钥
+                    
                     else:
                         # 对于其他 ClientError，我们认为它们是不可重试的
-                        log.error(f"An unexpected but fatal ClientError occurred with key ...{key_obj.key[-4:]}: {e}", exc_info=True)
+                        log.error(f"An unexpected but fatal ClientError occurred with key ...{key_obj.key[-4:]} (Status: {status_code}): {e}", exc_info=True)
                         last_exception = e
                         if key_obj:
                             await self.key_rotation_service.release_key(key_obj.key, success=True)
