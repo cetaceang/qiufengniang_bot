@@ -24,7 +24,8 @@ AVAILABLE_CATEGORIES = [
     "社区信息",
     "社区文化",
     "社区大事件",
-    "俚语"
+    "俚语",
+    "社区知识"
 ]
 
 class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
@@ -154,12 +155,15 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
         title = self.title_input.value.strip()
         content = self.content_input.value.strip()
 
+        # 根据是否已延迟响应，选择正确的发送方法
+        responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+
         if category not in AVAILABLE_CATEGORIES:
-            await interaction.response.send_message(f"无效的类别。请从以下选项中选择: {', '.join(AVAILABLE_CATEGORIES)}", ephemeral=True)
+            await responder(f"无效的类别。请从以下选项中选择: {', '.join(AVAILABLE_CATEGORIES)}", ephemeral=True)
             return
 
         if not all([category, title, content]):
-            await interaction.response.send_message("类别、标题和内容均不能为空。", ephemeral=True)
+            await responder("类别、标题和内容均不能为空。", ephemeral=True)
             return
 
         # --- 开发者后门逻辑 ---
@@ -246,9 +250,11 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
 
     async def developer_direct_add(self, interaction: discord.Interaction, category_name: str, title: str, content_text: str):
         """开发者直接添加知识条目，无需审核"""
+        responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+
         conn = self._get_world_book_connection()
         if not conn:
-            await interaction.response.send_message("❌ 数据库连接失败。", ephemeral=True)
+            await responder("❌ 数据库连接失败。", ephemeral=True)
             return
 
         try:
@@ -282,12 +288,12 @@ class WorldBookContributionModal(discord.ui.Modal, title="贡献知识"):
             # 异步触发RAG更新
             asyncio.create_task(incremental_rag_service.process_general_knowledge(entry_id))
 
-            await interaction.response.send_message(f"✅ **开发者后门**: 知识条目 **{title}** 已成功添加，无需审核。", ephemeral=True)
+            await responder(f"✅ **开发者后门**: 知识条目 **{title}** 已成功添加，无需审核。", ephemeral=True)
 
         except Exception as e:
             log.error(f"开发者直接添加知识条目时出错: {e}", exc_info=True)
             conn.rollback()
-            await interaction.response.send_message(f"❌ 添加时发生内部错误: {e}", ephemeral=True)
+            await responder(f"❌ 添加时发生内部错误: {e}", ephemeral=True)
         finally:
             conn.close()
         

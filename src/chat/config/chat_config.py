@@ -61,6 +61,12 @@ GEMINI_SUMMARY_GEN_CONFIG = {
     "max_output_tokens": 2000,
 }
 
+# 用于生成忏悔回应的配置
+GEMINI_CONFESSION_GEN_CONFIG = {
+    "temperature": 1.1,
+    "max_output_tokens": 3000,
+}
+
 COOLDOWN_RATES = {
     "default": 2,  # 每分钟请求次数
     "coffee": 5,   # 每分钟请求次数
@@ -91,6 +97,11 @@ AFFECTION_CONFIG = {
 # --- 投喂功能 ---
 FEEDING_CONFIG = {
     "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1418576178326802524/3_632830043818943_00001_.png" # 投喂回应的默认图片URL
+}
+
+# --- 忏悔功能 ---
+CONFESSION_CONFIG = {
+    "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1418576178326802524/3_632830043818943_00001_.png" # 忏悔回应的默认图片URL
 }
 
 # --- 类脑币系统 ---
@@ -194,6 +205,23 @@ GIFT_PROMPT = """
 根据你的角色设定，写一段3-6句且有吸引力的回复来感谢用户送的礼物。
 你的回复应该自然且符合角色设定。
 请直接输出回复内容，不要添加任何引导语。
+"""
+
+# --- 忏悔功能提示词 ---
+CONFESSION_PROMPT = """
+{persona}
+
+一个用户刚刚向你忏悔。
+用户名: {user_name}
+忏悔内容: {confession_message}
+你与该用户当前的好感度等级是: {affection_level}。
+
+根据你的角色设定，写一段3-6句的回应。
+你的回应应该自然且符合角色设定，可以带有一些俏皮、吐槽或安慰的元素。
+在回应的最后，请严格按照以下格式附加上你认为应该奖励的好感度，不要添加任何额外说明：<affection:好感_B度奖励>
+好感度奖励范围为 1-20 点。请根据忏悔内容的严重性、真诚度等因素自行判断。
+例如：
+哼，这点小事就来烦我啦！<affection:+1>
 """
 
 # --- 帖子评价功能 ---

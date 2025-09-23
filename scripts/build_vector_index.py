@@ -176,6 +176,7 @@ def build_document_text(entry: dict) -> str:
         "社区文化": lambda e: _build_text_generic(e, "社区文化"),
         "社区大事件": lambda e: _build_text_generic(e, "社区大事件"),
         "俚语": _build_text_slang,
+        "社区知识": lambda e: _build_text_generic(e, "社区知识"),
     }
 
     builder_func = builders.get(category)

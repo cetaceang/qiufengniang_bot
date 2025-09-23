@@ -704,5 +704,38 @@ class GeminiService:
         log.warning(f"未能为图文生成有效回复。Response: {response}")
         return "我好像没看懂这张图里是什么，可以换一张或者稍后再试试吗？"
 
+    @_api_key_handler
+    async def generate_confession_response(self, prompt: str, client: Any = None) -> Optional[str]:
+        """
+        专用于生成忏悔回应的方法。
+        """
+        if not client:
+            raise ValueError("Decorator failed to provide a client.")
+
+        loop = asyncio.get_event_loop()
+        gen_config = types.GenerateContentConfig(
+            **app_config.GEMINI_CONFESSION_GEN_CONFIG,
+            safety_settings=self.safety_settings
+        )
+        final_model_name = self.model_name
+
+        response = await loop.run_in_executor(
+            self.executor,
+            lambda: client.models.generate_content(
+                model=final_model_name,
+                contents=[prompt],
+                config=gen_config
+            )
+        )
+
+        if response.parts:
+            return response.text.strip()
+        
+        log.warning(f"generate_confession_response 未能生成有效内容。API 响应: {response}")
+        if response.prompt_feedback and response.prompt_feedback.block_reason:
+            log.warning(f"请求可能被安全策略阻止，原因: {response.prompt_feedback.block_reason}")
+        
+        return None
+
 # 全局实例
 gemini_service = GeminiService()

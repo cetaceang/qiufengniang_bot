@@ -135,6 +135,15 @@ class ChatDatabaseManager:
                 );
             """)
 
+            # --- 忏悔日志表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS confession_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    timestamp TIMESTAMP NOT NULL
+                );
+            """)
+
             # --- 用户核心档案表 (User Profile) ---
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
