@@ -270,75 +270,101 @@ class GeminiService:
     def _api_key_handler(func: Callable) -> Callable:
         """
         一个装饰器，用于优雅地处理 API 密钥的获取、释放和重试逻辑。
+        实现了两层重试：
+        1. 外层循环：持续获取可用密钥，如果所有密钥都在冷却，则会等待。
+        2. 内层循环：对获取到的单个密钥，在遇到可重试错误时，会根据配置进行多次尝试。
         """
         @wraps(func)
         async def wrapper(self: 'GeminiService', *args, **kwargs):
-            max_retries = len(self.key_rotation_service.keys)
-            last_exception = None
+            # --- 新逻辑：将冷却检查移入装饰器 ---
+            # 从参数中安全地提取 user_id 和 cooldown_type
+            user_id = args[0] if args else kwargs.get('user_id')
+            cooldown_type = kwargs.get('cooldown_type', 'default')
 
-            for attempt in range(max_retries):
+            if not isinstance(user_id, int):
+                log.error(f"无法从参数中为 {func.__name__} 提取有效的 user_id。")
+                return "抱歉，处理您的请求时发生了一个内部错误。"
+
+            # 1. 检查先行：在任何操作之前，先检查用户是否已处于冷却状态。
+            if await self.is_user_on_cooldown(user_id, cooldown_type):
+                log.warning(f"用户 {user_id} 在进入API密钥处理前已触发 {cooldown_type} 冷却限制。")
+                return None # 直接返回，不进入密钥轮询
+
+            last_exception = None
+            
+            # 外层循环：持续获取和尝试不同的密钥
+            while True:
                 key_obj = None
                 try:
-                    # 1. 获取密钥和客户端
+                    # 2. 获取一个密钥。如果所有密钥都在冷却，这里会异步等待。
                     key_obj = await self.key_rotation_service.acquire_key()
                     client = self._create_client_with_key(key_obj.key)
-                    log.info(f"Attempt {attempt + 1}/{max_retries} using key ...{key_obj.key[-4:]} for {func.__name__}")
-
-                    # 2. 执行原始函数，并传入 client
-                    # 将 client 作为关键字参数传递，以便原始函数可以使用它
-                    result = await func(self, *args, client=client, **kwargs)
                     
-                    # 3. 如果成功，释放密钥并返回结果
-                    await self.key_rotation_service.release_key(key_obj.key, success=True)
-                    log.debug(f"Key ...{key_obj.key[-4:]} released successfully after {func.__name__}.")
-                    return result
+                    key_should_be_cooled_down = False
+                    key_is_invalid = False
 
-                except genai_errors.ClientError as e:
-                    # --- 修复：从异常字符串中可靠地解析状态码 ---
-                    error_str = str(e)
-                    match = re.match(r"(\d{3})", error_str)
-                    status_code = int(match.group(1)) if match else None
-
-                    if status_code in [429, 503]:
-                        log.warning(f"Key ...{key_obj.key[-4:]} encountered a retryable error (Status: {status_code}) for {func.__name__}. Retrying with another key. Details: {e}")
-                        last_exception = e
-                        if key_obj:
-                            await self.key_rotation_service.release_key(key_obj.key, success=False)
-                        continue  # 继续下一次循环，尝试新密钥
-                    
-                    elif status_code == 403:
-                        log.error(f"Key ...{key_obj.key[-4:]} is invalid or has been revoked (Permission Denied, Status: 403). Disabling it. Details: {e}")
-                        last_exception = e
-                        if key_obj:
-                            self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
-                        continue  # 权限问题，必须换密钥
-                    
-                    else:
-                        # 对于其他 ClientError，我们认为它们是不可重试的
-                        log.error(f"An unexpected but fatal ClientError occurred with key ...{key_obj.key[-4:]} (Status: {status_code}): {e}", exc_info=True)
-                        last_exception = e
-                        if key_obj:
+                    # 3. 内层循环：使用同一个密钥进行多次尝试
+                    max_attempts = app_config.API_RETRY_CONFIG["MAX_ATTEMPTS_PER_KEY"]
+                    for attempt in range(max_attempts):
+                        try:
+                            log.info(f"Using key ...{key_obj.key[-4:]} (Attempt {attempt + 1}/{max_attempts}) for {func.__name__}")
+                            
+                            # 4. 执行原始的API调用函数
+                            result = await func(self, *args, client=client, **kwargs)
+                            
+                            # 5. 如果成功，记账、释放密钥并立即返回结果
+                            # --- 新逻辑：仅在成功时更新冷却计数 ---
+                            self.user_request_timestamps.setdefault(user_id, []).append(datetime.now(timezone.utc))
                             await self.key_rotation_service.release_key(key_obj.key, success=True)
-                        # 发生未知API错误，中断并返回用户提示
-                        return "抱歉，AI服务遇到了一个意料之外的错误，请稍后再试。"
+                            return result
 
-                except NoAvailableKeyError as e:
-                    log.error("All API keys are currently unavailable. Cannot proceed.")
-                    last_exception = e
-                    # 所有密钥都不可用，直接中断并返回用户提示
+                        except genai_errors.ClientError as e:
+                            last_exception = e
+                            error_str = str(e)
+                            match = re.match(r"(\d{3})", error_str)
+                            status_code = int(match.group(1)) if match else None
+
+                            if status_code in [429, 503]: # 可重试的错误
+                                log.warning(f"Key ...{key_obj.key[-4:]} encountered a retryable error (Status: {status_code}).")
+                                if attempt < max_attempts - 1:
+                                    delay = app_config.API_RETRY_CONFIG["RETRY_DELAY_SECONDS"]
+                                    log.info(f"Waiting for {delay}s before retrying with the same key.")
+                                    await asyncio.sleep(delay)
+                                    # 继续内层循环，使用同一个密钥重试
+                                else:
+                                    log.warning(f"All {max_attempts} retries failed for key ...{key_obj.key[-4:]}. It will be put in cooldown.")
+                                    key_should_be_cooled_down = True
+                            
+                            elif status_code == 403: # 密钥无效错误
+                                log.error(f"Key ...{key_obj.key[-4:]} is invalid or revoked (403 Forbidden). Disabling it.")
+                                await self.key_rotation_service.disable_key(key_obj.key, reason=str(e))
+                                key_is_invalid = True
+                                break # 中断内层循环，去外层获取新密钥
+
+                            else: # 其他致命的客户端错误
+                                log.error(f"An unexpected but fatal ClientError occurred with key ...{key_obj.key[-4:]} (Status: {status_code}): {e}", exc_info=True)
+                                await self.key_rotation_service.release_key(key_obj.key, success=True) # 释放但不惩罚
+                                return "抱歉，AI服务遇到了一个意料之外的错误，请稍后再试。"
+                        
+                        except Exception as e:
+                            last_exception = e
+                            log.error(f"An unexpected error occurred with key ...{key_obj.key[-4:]}: {e}", exc_info=True)
+                            await self.key_rotation_service.release_key(key_obj.key, success=True) # 释放但不惩罚
+                            return "抱歉，AI服务遇到了一个内部错误，请稍后再试。"
+
+                    # 5. 内层循环结束后，根据标志位处理当前密钥
+                    if key_is_invalid:
+                        continue # 继续外层循环，获取下一个密钥
+                    
+                    if key_should_be_cooled_down:
+                        await self.key_rotation_service.release_key(key_obj.key, success=False)
+                        # 继续外层循环，获取下一个密钥
+
+                except NoAvailableKeyError:
+                    # 这种情况理论上不应该发生，因为 acquire_key 会一直等待。
+                    # 但作为保险，我们处理一下。
+                    log.error("All API keys are currently unavailable and acquire_key failed to wait. This is unexpected.")
                     return "抱歉，我们的AI服务暂时过载，请稍后再试。"
-                
-                except Exception as e:
-                    log.error(f"An unexpected error occurred within the API call of {func.__name__} with key ...{key_obj.key[-4:]}: {e}", exc_info=True)
-                    last_exception = e
-                    if key_obj:
-                        await self.key_rotation_service.release_key(key_obj.key, success=True)
-                    # 发生未知API错误，中断并返回用户提示
-                    return "抱歉，AI服务遇到了一个内部错误，请稍后再试。"
-                
-            log.error(f"All {max_retries} keys failed for {func.__name__}. Last error: {last_exception}")
-            # 在所有尝试失败后，返回一个明确的错误消息给用户
-            return "抱歉，我们的AI服务暂时过载，请稍后再试。"
 
         return wrapper
 
@@ -350,9 +376,7 @@ class GeminiService:
                                   personal_summary: Optional[str] = None,
                                   cooldown_type: str = "default", client: Any = None) -> str:
         """生成AI回复（已重构）。"""
-        if not await self._check_and_update_cooldown(user_id, cooldown_type):
-            return None
-
+        # --- 新逻辑：冷却检查已移至装饰器，此处不再需要 ---
         # 装饰器会处理密钥和客户端的创建，这里我们直接使用
         # 注意：装饰器会将 client 作为关键字参数注入
         if not client:

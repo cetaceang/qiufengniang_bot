@@ -1,6 +1,7 @@
 import aiosqlite
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from src.chat.utils.database import chat_db_manager
+from src.chat.utils.time_utils import get_start_of_today_utc
 
 class FeedingService:
     def __init__(self):
@@ -9,10 +10,11 @@ class FeedingService:
     async def record_feeding(self, user_id: str):
         """记录一次投喂事件"""
         query = "INSERT INTO feeding_log (user_id, timestamp) VALUES (?, ?)"
+        # 数据库中统一使用 UTC 时间
         await self.db_manager._execute(
             self.db_manager._db_transaction,
             query,
-            (user_id, datetime.utcnow().isoformat()),
+            (user_id, datetime.now(timezone.utc).isoformat()),
             commit=True
         )
 
@@ -27,10 +29,11 @@ class FeedingService:
             self.db_manager._db_transaction, query1, (user_id,), fetch="one"
         )
 
-        now = datetime.utcnow()
+        now_utc = datetime.now(timezone.utc)
         if last_feeding_row:
-            last_feeding_time = datetime.fromisoformat(last_feeding_row[0])
-            time_since_last_feeding = now - last_feeding_time
+            # fromisoformat 产生的是 naive datetime，但我们知道它代表 UTC
+            last_feeding_time = datetime.fromisoformat(last_feeding_row[0]).replace(tzinfo=timezone.utc)
+            time_since_last_feeding = now_utc - last_feeding_time
             if time_since_last_feeding < timedelta(hours=3):
                 remaining_time = timedelta(hours=3) - time_since_last_feeding
                 hours, remainder = divmod(remaining_time.seconds, 3600)
@@ -42,16 +45,17 @@ class FeedingService:
                     cooldown_message = f"{minutes}分钟"
                 return False, f"饱啦饱啦, **{cooldown_message}** 后再来吧！"
 
-        # 2. 检查过去24小时内的投喂次数
-        one_day_ago = now - timedelta(days=1)
+        # 2. 检查今天（北京时间）的投喂次数
+        start_of_today_utc = get_start_of_today_utc()
+
         query2 = "SELECT COUNT(*) FROM feeding_log WHERE user_id = ? AND timestamp >= ?"
         count_row = await self.db_manager._execute(
-            self.db_manager._db_transaction, query2, (user_id, one_day_ago.isoformat()), fetch="one"
+            self.db_manager._db_transaction, query2, (user_id, start_of_today_utc.isoformat()), fetch="one"
         )
 
-        feedings_in_last_24_hours = count_row[0] if count_row else 0
+        feedings_today = count_row[0] if count_row else 0
 
-        if feedings_in_last_24_hours >= 3:
+        if feedings_today >= 3:
             return False, "你今天已经给我吃三次啦,肚子饱饱的,明天再说吧！"
 
         return True, ""

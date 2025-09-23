@@ -119,20 +119,18 @@ class PromptService:
                         first_text_index = i
                         break
                 
-                # 彻底重构当前用户消息的格式，确保 [用户名] 和冒号始终存在且正确
+                # 重构当前用户消息的格式，以符合新的标准
                 if first_text_index != -1 and isinstance(processed_parts[first_text_index], str):
                     original_message = processed_parts[first_text_index]
-                    reply_info = ""
-                    clean_message = original_message
-
-                    # 匹配并提取回复块
-                    reply_match = re.match(r'^(\[回复\s*@?[^\]]+\])\s*', original_message)
-                    if reply_match:
-                        reply_info = reply_match.group(1)
-                        clean_message = original_message[reply_match.end():]
-
-                    # 重新构建，确保格式绝对正确
-                    formatted_message = f"[{user_name}]{reply_info}: {clean_message}"
+                    
+                    # 根据消息内容是否包含换行符（由 message_processor 添加，表示是引用回复）来决定格式
+                    if '\n' in original_message:
+                        # 如果是回复，用户名和消息之间用换行符
+                        formatted_message = f"[{user_name}]:\n{original_message}"
+                    else:
+                        # 如果是普通消息，则用冒号和空格
+                        formatted_message = f"[{user_name}]: {original_message}"
+                    
                     processed_parts[first_text_index] = formatted_message
 
             current_user_parts.extend(processed_parts)

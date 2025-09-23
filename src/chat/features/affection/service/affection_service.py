@@ -1,12 +1,13 @@
 import random
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from typing import Optional, Dict, Any
 import yaml # 导入yaml库
 
 from src.chat.utils.database import chat_db_manager
 from src.chat.config.chat_config import AFFECTION_CONFIG
 from src.config import DEVELOPER_USER_IDS
+from src.chat.utils.time_utils import BEIJING_TZ
 
 # --- 日志记录器 ---
 log = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class AffectionService:
     async def _get_or_create_affection(self, user_id: int, guild_id: int) -> Dict[str, Any]:
         """获取或创建用户的好感度记录，并处理每日重置。"""
         affection_record = await self.db.get_affection(user_id, guild_id)
-        today = date.today().isoformat()
+        today = datetime.now(BEIJING_TZ).date().isoformat()
 
         if affection_record:
             affection_data = dict(affection_record)
@@ -103,7 +104,7 @@ class AffectionService:
             user_id, guild_id,
             affection_points=new_points,
             daily_affection_gain=new_daily_gain,
-            last_interaction_date=date.today().isoformat()
+            last_interaction_date=datetime.now(BEIJING_TZ).date().isoformat()
         )
         log.info(f"用户 {user_id} 的好感度增加了 {points_to_add} 点。")
         return points_to_add
@@ -130,7 +131,7 @@ class AffectionService:
         返回一个元组 (success: bool, message: str)。
         """
         affection_data = await self._get_or_create_affection(user_id, guild_id)
-        today = date.today().isoformat()
+        today = datetime.now(BEIJING_TZ).date().isoformat()
 
         # 检查今天是否已经送过礼物，但开发者不受此限制
         if user_id not in DEVELOPER_USER_IDS and affection_data.get('last_gift_date') == today:
@@ -164,7 +165,7 @@ class AffectionService:
         await self.db.update_affection(
             user_id, guild_id,
             affection_points=new_points,
-            last_interaction_date=date.today().isoformat()
+            last_interaction_date=datetime.now(BEIJING_TZ).date().isoformat()
         )
         log.info(f"用户 {user_id} 的好感度直接增加了 {points_to_add} 点。新总点数: {new_points}")
         return new_points
