@@ -4,16 +4,33 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
+import os
 from datetime import datetime, timedelta
 from src.chat.utils.database import chat_db_manager
-from src.config import DEVELOPER_USER_IDS
 
 log = logging.getLogger(__name__)
 
+def _parse_developer_ids() -> set[int]:
+    """从环境变量中解析逗号分隔的 ID 列表，兼容带引号的字符串"""
+    ids_str = os.getenv("DEVELOPER_USER_IDS", "")
+    if not ids_str:
+        return set()
+    
+    # 移除字符串两端的引号
+    ids_str = ids_str.strip().strip("'\"")
+    
+    try:
+        return {int(id_str.strip()) for id_str in ids_str.split(',') if id_str.strip()}
+    except ValueError:
+        log.error(f"无法解析 DEVELOPER_USER_IDS: '{ids_str}'", exc_info=True)
+        return set()
+
 def is_developer():
     """检查用户是否是开发者"""
+    developer_ids = _parse_developer_ids()
     async def predicate(interaction: discord.Interaction) -> bool:
-        if interaction.user.id not in DEVELOPER_USER_IDS:
+        if interaction.user.id not in developer_ids:
+            log.warning(f"权限检查失败: 用户 {interaction.user.id} 不在开发者列表 {developer_ids} 中。")
             await interaction.response.send_message("你没有权限使用此命令。", ephemeral=True)
             return False
         return True
