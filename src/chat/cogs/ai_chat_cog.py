@@ -15,6 +15,7 @@ from src.chat.services.context_service_test import context_service_test # 导入
 # 导入数据库管理器以进行黑名单检查和斜杠命令
 from src.chat.utils.database import chat_db_manager
 from src.chat.config.chat_config import CHAT_ENABLED
+from src.chat.features.odysseia_coin.service.coin_service import coin_service
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,14 @@ class AIChatCog(commands.Cog):
         if message.author.bot:
             return
 
+        # 新增：检查是否在帖子中，以及帖子创建者是否禁用了回复
+        if isinstance(message.channel, discord.Thread):
+            # 检查帖子的创建者
+            thread_owner = message.channel.owner
+            if thread_owner and await coin_service.blocks_thread_replies(thread_owner.id):
+                log.info(f"帖子 '{message.channel.name}' 的创建者 {thread_owner.id} 已禁用回复，跳过消息处理。")
+                return
+
         # 检查消息是否符合处理条件：私聊 或 在服务器中被@
         is_dm = message.guild is None
         guild_id = message.guild.id if message.guild else 0
@@ -50,6 +59,10 @@ class AIChatCog(commands.Cog):
             return
         
         if not is_dm and not is_mentioned:
+            return
+
+        # 在显示“输入中”之前执行所有前置检查
+        if not await chat_service.should_process_message(message):
             return
 
         # 显示"正在输入"状态，直到AI响应生成完毕

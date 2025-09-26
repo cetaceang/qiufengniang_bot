@@ -5,10 +5,19 @@
 用于定义商店中所有商品的详细信息和价格。
 """
 
-from src.chat.features.odysseia_coin.service.coin_service import PERSONAL_MEMORY_ITEM_EFFECT_ID, WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID, COMMUNITY_MEMBER_UPLOAD_EFFECT_ID
+from src.chat.features.odysseia_coin.service.coin_service import (
+    PERSONAL_MEMORY_ITEM_EFFECT_ID, WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID,
+    COMMUNITY_MEMBER_UPLOAD_EFFECT_ID, DISABLE_THREAD_COMMENTOR_EFFECT_ID,
+    BLOCK_THREAD_REPLIES_EFFECT_ID, ENABLE_THREAD_COMMENTOR_EFFECT_ID,
+    ENABLE_THREAD_REPLIES_EFFECT_ID
+)
 
 SHOP_ITEMS = [
     # name, description, price, category, target, effect_id
+    ("枯萎向日葵", "购买后类脑娘不会再出现在帖子下面", 0, "物品-给自己", "self", DISABLE_THREAD_COMMENTOR_EFFECT_ID),
+    ("告示牌", "上面写着禁止通行", 0, "物品-给自己", "self", BLOCK_THREAD_REPLIES_EFFECT_ID),
+    ("魔法向日葵", "一朵充满活力的向日葵，似乎能让周围的气氛都活跃起来。", 10, "物品-给自己", "self", ENABLE_THREAD_COMMENTOR_EFFECT_ID),
+    ("通行许可", "一张官方签发的许可，撤销了之前的“禁止通行”指令。", 10, "物品-给自己", "self", ENABLE_THREAD_REPLIES_EFFECT_ID),
     ("咖啡", "喝下后你感觉精力变强了一点...不过好像只有24h", 50, "食品-给自己", "self", "coffee_chat_cooldown"),
     ("个人记忆功能", "解锁与类脑娘的专属长期记忆，让她真正地记住你。", 100, "物品-给自己", "self", PERSONAL_MEMORY_ITEM_EFFECT_ID),
     ("知识纸条", "写下你对社区的了解（仅限无关社区成员的信息），帮助类脑娘更好地认识世界。", 0, "物品-贡献", "self", WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID),

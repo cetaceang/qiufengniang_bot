@@ -14,6 +14,7 @@ from src.chat.features.odysseia_coin.service.coin_service import coin_service
 from src.chat.utils.database import chat_db_manager
 from src.chat.features.personal_memory.services.personal_memory_service import personal_memory_service
 from src.chat.config.chat_config import PERSONAL_MEMORY_CONFIG, DEBUG_CONFIG
+from src.chat.features.chat_settings.services.chat_settings_service import chat_settings_service
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +22,54 @@ class ChatService:
     """
     负责编排整个AI聊天响应流程。
     """
+    async def should_process_message(self, message: discord.Message) -> bool:
+        """
+        执行前置检查，判断消息是否应该被处理，以避免不必要的“输入中”状态。
+        """
+        author = message.author
+        guild_id = message.guild.id if message.guild else 0
+
+        # 1. 全局聊天开关检查
+        if not await chat_settings_service.is_chat_globally_enabled(guild_id):
+            log.info(f"服务器 {guild_id} 全局聊天已禁用，跳过前置检查。")
+            return False
+
+        # 2. 频道/分类设置检查
+        channel_category_id = getattr(message.channel, 'category_id', None)
+        effective_config = await chat_settings_service.get_effective_channel_config(guild_id, message.channel.id, channel_category_id)
+
+        if not effective_config.get('is_chat_enabled', True):
+            # 检查是否满足通行许可的例外条件
+            pass_is_granted = False
+            if isinstance(message.channel, discord.Thread) and message.channel.owner_id:
+                # 如果帖主没有设置“阻止回复”（即拥有通行许可），则授予通行权
+                if not await coin_service.blocks_thread_replies(message.channel.owner_id):
+                    pass_is_granted = True
+                    log.info(f"帖主 {message.channel.owner_id} 拥有通行许可，覆盖频道 {message.channel.id} 的聊天限制。")
+
+            # 如果没有授予通行权，则按原逻辑返回 False
+            if not pass_is_granted:
+                log.info(f"频道 {message.channel.id} 聊天已禁用，跳过前置检查。")
+                return False
+
+        # 3. 新版冷却时间检查
+        if await chat_settings_service.is_user_on_cooldown(author.id, message.channel.id, effective_config):
+            log.info(f"用户 {author.id} 在频道 {message.channel.id} 处于新版冷却状态，跳过前置检查。")
+            return False
+            
+        # 4. 黑名单检查
+        if await chat_db_manager.is_user_blacklisted(author.id, guild_id):
+            log.info(f"用户 {author.id} 在服务器 {guild_id} 被拉黑，跳过前置检查。")
+            return False
+            
+        # 5. 旧版冷却检查
+        cooldown_type = await coin_service.get_user_cooldown_type(author.id)
+        if await gemini_service.is_user_on_cooldown(author.id, cooldown_type):
+            log.info(f"用户 {author.id} 处于奥德赛币冷却状态，跳过前置检查。")
+            return False
+
+        return True
+
     async def handle_chat_message(self, message: discord.Message, processed_data: Dict[str, Any]) -> str:
         """
         处理聊天消息，生成并返回AI的最终回复。
@@ -34,6 +83,10 @@ class ChatService:
         """
         author = message.author
         guild_id = message.guild.id if message.guild else 0
+
+        # --- 获取最新的有效配置 ---
+        channel_category_id = getattr(message.channel, 'category_id', None)
+        effective_config = await chat_settings_service.get_effective_channel_config(guild_id, message.channel.id, channel_category_id)
 
         # --- 个人记忆消息计数 ---
         # --- 个人记忆处理 ---
@@ -68,17 +121,8 @@ class ChatService:
         image_data_list = processed_data["image_data_list"]
 
         try:
-            # 1. --- 前置检查 ---
-            # 检查用户是否被拉黑
-            if await chat_db_manager.is_user_blacklisted(author.id, guild_id):
-                log.info(f"用户 {author.id} 在服务器 {guild_id} 被拉黑，已跳过。")
-                return None
-
-            # 检查冷却状态
+            # 获取旧版冷却类型，以传递给AI服务
             cooldown_type = await coin_service.get_user_cooldown_type(author.id)
-            if await gemini_service.is_user_on_cooldown(author.id, cooldown_type):
-                log.info(f"用户 {author.id} 处于冷却状态，已跳过。")
-                return None
 
             # 2. --- 上下文与知识库检索 ---
             # 获取频道历史上下文
@@ -131,6 +175,9 @@ class ChatService:
             if not ai_response:
                 log.info(f"AI服务未返回回复（可能由于冷却），跳过用户 {author.id}。")
                 return None
+
+            # 更新新系统的CD
+            await chat_settings_service.update_user_cooldown(author.id, message.channel.id, effective_config)
 
             # 5. --- 后处理与格式化 ---
             final_response = self._format_ai_response(ai_response)

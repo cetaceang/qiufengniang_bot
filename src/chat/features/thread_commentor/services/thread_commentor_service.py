@@ -10,9 +10,10 @@ import os
 from src import config
 from src.chat.services.gemini_service import gemini_service
 from src.chat.config.thread_prompts import THREAD_PRAISE_PROMPT
-from src.chat.config.prompts import SYSTEM_PROMPT
-from src.chat.utils.prompt_utils import replace_emojis
+from src.chat.utils.prompt_utils import replace_emojis, get_thread_commentor_persona
 from src.chat.utils.database import chat_db_manager
+from src.chat.features.odysseia_coin.service.coin_service import coin_service
+from src.chat.config.chat_config import DEBUG_CONFIG
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +72,16 @@ class ThreadCommentorService:
         针对新创建的帖子生成一段结合用户记忆的个性化夸奖。
         """
         try:
+            # 检查用户是否禁用了暖贴功能
+            if await coin_service.has_withered_sunflower(user_id):
+                log.info(f"用户 {user_id} 已禁用暖贴功能，跳过对帖子 '{thread.name}' 的评价。")
+                return None
+
+            # 检查用户是否禁用了帖子回复功能
+            if await coin_service.blocks_thread_replies(user_id):
+                log.info(f"用户 {user_id} 已禁用帖子回复功能，跳过对帖子 '{thread.name}' 的评价。")
+                return None
+
             # 1. 获取帖子的初始消息
             if thread.starter_message:
                 first_message = thread.starter_message
@@ -93,30 +104,23 @@ class ThreadCommentorService:
             # 3. 获取用户记忆
             user_memory = await self._get_user_memory(user_id)
 
-            # 4. 构建提示
-            # 首先构建核心系统提示词
-            from datetime import datetime, timezone, timedelta
-            beijing_tz = timezone(timedelta(hours=8))
-            current_beijing_time = datetime.now(beijing_tz).strftime('%Y年%m月%d日 %H:%M')
-            core_prompt = SYSTEM_PROMPT.format(
-                current_time=current_beijing_time,
-                user_name=user_nickname
-            )
+            # 4. 准备调用所需的所有信息片段
+            core_persona = get_thread_commentor_persona()
             
-            # 然后构建帖子夸奖提示词
-            praise_prompt = THREAD_PRAISE_PROMPT.format(
+            task_prompt = THREAD_PRAISE_PROMPT.format(
                 user_nickname=user_nickname,
+                user_memory=user_memory
+            )
+
+            log.info(f"为帖子 '{title}' 准备好所有上下文信息，即将调用AI服务。")
+
+            # 5. 调用重构后的 Gemini 服务方法
+            praise_text = await gemini_service.generate_thread_praise(
+                core_persona=core_persona,
                 user_memory=user_memory,
+                task_prompt=task_prompt,
                 thread_content=thread_full_content
             )
-            
-            # 将两者结合
-            prompt = f"{core_prompt}\n\n{praise_prompt}"
-            
-            log.info(f"为帖子 '{title}' 构建的最终Prompt:\n---\n{prompt}\n---")
-
-            # 5. 调用 Gemini 服务生成夸奖
-            praise_text = await gemini_service.generate_thread_praise(prompt)
 
             if praise_text:
                 # 使用 prompt_utils 中的函数来处理表情符号

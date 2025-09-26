@@ -52,7 +52,7 @@ GEMINI_THREAD_PRAISE_CONFIG = {
     "temperature": 1.21,
     "top_p": 0.97,
     "top_k": 40,
-    "max_output_tokens": 4000,
+    "max_output_tokens": 8192,
 }
 
 # 用于生成个人记忆摘要的配置
@@ -112,7 +112,7 @@ COIN_CONFIG = {
 
 # --- 个人记忆功能 ---
 PERSONAL_MEMORY_CONFIG = {
-    "summary_threshold": 1,       # 触发总结的消息数量阈值 (测试用 5, 原为 50)
+    "summary_threshold": 20,       # 触发总结的消息数量阈值 (测试用 5, 原为 50)
 }
 
 

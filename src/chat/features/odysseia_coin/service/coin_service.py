@@ -12,6 +12,10 @@ log = logging.getLogger(__name__)
 PERSONAL_MEMORY_ITEM_EFFECT_ID = "unlock_personal_memory"
 WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID = "contribute_to_world_book"
 COMMUNITY_MEMBER_UPLOAD_EFFECT_ID = "upload_community_member"
+DISABLE_THREAD_COMMENTOR_EFFECT_ID = "disable_thread_commentor"
+BLOCK_THREAD_REPLIES_EFFECT_ID = "block_thread_replies"
+ENABLE_THREAD_COMMENTOR_EFFECT_ID = "enable_thread_commentor"
+ENABLE_THREAD_REPLIES_EFFECT_ID = "enable_thread_replies"
 
 
 class CoinService:
@@ -307,6 +311,97 @@ class CoinService:
             elif item_effect == COMMUNITY_MEMBER_UPLOAD_EFFECT_ID:
                 # 购买"社区成员档案上传"商品，需要弹出模态窗口
                 return True, f"你花费了 {total_cost} 类脑币购买了 {quantity}x **{item['name']}**。", new_balance, True, False
+            elif item_effect == DISABLE_THREAD_COMMENTOR_EFFECT_ID:
+                # 购买“枯萎向日葵”，禁用暖贴功能
+                def _transaction():
+                    import sqlite3
+                    conn = None
+                    try:
+                        conn = sqlite3.connect(chat_db_manager.db_path)
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            UPDATE user_coins
+                            SET has_withered_sunflower = 1
+                            WHERE user_id = ?
+                        """, (user_id,))
+                        if cursor.rowcount == 0:
+                            cursor.execute("""
+                                INSERT INTO user_coins (user_id, has_withered_sunflower)
+                                VALUES (?, 1)
+                                ON CONFLICT(user_id) DO UPDATE SET
+                                    has_withered_sunflower = 1;
+                            """, (user_id,))
+                        conn.commit()
+                        log.info(f"用户 {user_id} 购买了枯萎向日葵，已禁用暖贴功能。")
+                    except Exception as e:
+                        if conn:
+                            conn.rollback()
+                        log.error(f"为用户 {user_id} 更新枯萎向日葵状态时出错: {e}")
+                        raise
+                    finally:
+                        if conn:
+                            conn.close()
+                await chat_db_manager._execute(_transaction)
+                return True, f"你“购买”了 **{item['name']}**。从此，类脑娘将不再暖你的贴。", new_balance, False, False
+            elif item_effect == BLOCK_THREAD_REPLIES_EFFECT_ID:
+                def _transaction():
+                    import sqlite3
+                    conn = None
+                    try:
+                        conn = sqlite3.connect(chat_db_manager.db_path)
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            UPDATE user_coins
+                            SET blocks_thread_replies = 1
+                            WHERE user_id = ?
+                        """, (user_id,))
+                        if cursor.rowcount == 0:
+                            cursor.execute("""
+                                INSERT INTO user_coins (user_id, blocks_thread_replies)
+                                VALUES (?, 1)
+                                ON CONFLICT(user_id) DO UPDATE SET
+                                    blocks_thread_replies = 1;
+                            """, (user_id,))
+                        conn.commit()
+                        log.info(f"用户 {user_id} 购买了告示牌，已禁用帖子回复功能。")
+                    except Exception as e:
+                        if conn:
+                            conn.rollback()
+                        log.error(f"为用户 {user_id} 更新告示牌状态时出错: {e}")
+                        raise
+                    finally:
+                        if conn:
+                            conn.close()
+                await chat_db_manager._execute(_transaction)
+                return True, f"你举起了 **{item['name']}**，上面写着“禁止通行”。从此，类脑娘将不再进入你的帖子。", new_balance, False, False
+            elif item_effect == ENABLE_THREAD_COMMENTOR_EFFECT_ID:
+                # 购买“魔法向日葵”，重新启用暖贴功能
+                def _transaction():
+                    import sqlite3
+                    conn = sqlite3.connect(chat_db_manager.db_path)
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("UPDATE user_coins SET has_withered_sunflower = 0 WHERE user_id = ?", (user_id,))
+                        conn.commit()
+                        log.info(f"用户 {user_id} 购买了魔法向日葵，已重新启用暖贴功能。")
+                    finally:
+                        conn.close()
+                await chat_db_manager._execute(_transaction)
+                return True, f"你使用了 **{item['name']}**，枯萎的向日葵恢复了生机。类脑娘现在会重新暖你的贴了。", new_balance, False, False
+            elif item_effect == ENABLE_THREAD_REPLIES_EFFECT_ID:
+                # 购买“通行许可”，重新启用帖子回复
+                def _transaction():
+                    import sqlite3
+                    conn = sqlite3.connect(chat_db_manager.db_path)
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("UPDATE user_coins SET blocks_thread_replies = 0 WHERE user_id = ?", (user_id,))
+                        conn.commit()
+                        log.info(f"用户 {user_id} 购买了通行许可，已重新启用帖子回复功能。")
+                    finally:
+                        conn.close()
+                await chat_db_manager._execute(_transaction)
+                return True, f"你使用了 **{item['name']}**，告示牌被收了起来。类脑娘现在可以再次进入你的帖子了。", new_balance, False, False
             else:
                 # 其他未知效果，暂时先放入背包
                 await self._add_item_to_inventory(user_id, item_id, quantity)
@@ -358,6 +453,18 @@ class CoinService:
                 pass
         
         return 'default'
+
+    async def has_withered_sunflower(self, user_id: int) -> bool:
+        """检查用户是否拥有枯萎向日葵（即是否禁用了暖贴功能）"""
+        query = "SELECT has_withered_sunflower FROM user_coins WHERE user_id = ?"
+        result = await chat_db_manager._execute(chat_db_manager._db_transaction, query, (user_id,), fetch="one")
+        return result['has_withered_sunflower'] if result and result['has_withered_sunflower'] else False
+
+    async def blocks_thread_replies(self, user_id: int) -> bool:
+        """检查用户是否拥有告示牌（即是否禁用了帖子回复功能）"""
+        query = "SELECT blocks_thread_replies FROM user_coins WHERE user_id = ?"
+        result = await chat_db_manager._execute(chat_db_manager._db_transaction, query, (user_id,), fetch="one")
+        return result['blocks_thread_replies'] if result and result['blocks_thread_replies'] else False
 
 
 async def _setup_initial_items():

@@ -581,13 +581,16 @@ class GeminiService:
         return None
 
     @_api_key_handler
-    async def generate_thread_praise(self, prompt: str, client: Any = None) -> Optional[str]:
+    async def generate_thread_praise(self, core_persona: str, user_memory: str, task_prompt: str, thread_content: str, client: Any = None) -> Optional[str]:
         """
         专用于生成帖子夸奖的方法。
-        使用独立的、为创意生成优化的配置。
+        严格按照 user/model 交替确认的格式构建上下文。
 
         Args:
-            prompt: 包含帖子内容的完整提示。
+            core_persona: 精简后的核心人设。
+            user_memory: 关于用户的记忆。
+            task_prompt: 具体的任务指令。
+            thread_content: 帖子内容。
 
         Returns:
             生成的夸奖文本，如果失败则返回 None。
@@ -602,11 +605,32 @@ class GeminiService:
         )
         final_model_name = self.model_name
 
+        # 严格按照用户要求的格式构建多轮对话历史
+        final_contents = [
+            types.Content(role="user", parts=[types.Part(text=core_persona)]),
+            types.Content(role="model", parts=[types.Part(text="知道了")]),
+            types.Content(role="user", parts=[types.Part(text=user_memory)]),
+            types.Content(role="model", parts=[types.Part(text="知道了")]),
+            types.Content(role="user", parts=[types.Part(text=task_prompt)]),
+            types.Content(role="model", parts=[types.Part(text="知道了")]),
+            types.Content(role="user", parts=[types.Part(text=thread_content)]),
+        ]
+        
+        # 如果开启了 AI 完整上下文日志，则打印到终端
+        if app_config.DEBUG_CONFIG["LOG_AI_FULL_CONTEXT"]:
+            log.info(f"--- 暖贴功能 · 完整 AI 上下文 ---")
+            log.info(json.dumps(
+                [self._serialize_parts_for_logging_full(content) for content in final_contents],
+                ensure_ascii=False,
+                indent=2
+            ))
+            log.info("------------------------------------")
+
         response = await loop.run_in_executor(
             self.executor,
             lambda: client.models.generate_content(
                 model=final_model_name,
-                contents=[prompt],
+                contents=final_contents,
                 config=gen_config
             )
         )

@@ -1,3 +1,4 @@
+
 import sqlite3
 import json
 import logging
@@ -205,18 +206,83 @@ class ChatDatabaseManager:
                 );
             """)
             
-            # 检查并添加 coffee_effect_expires_at 列到 user_coins
+            # 检查并向 user_coins 添加列
             cursor.execute("PRAGMA table_info(user_coins);")
-            columns = [info[1] for info in cursor.fetchall()]
-            if 'coffee_effect_expires_at' not in columns:
+            columns_coins = [info[1] for info in cursor.fetchall()]
+            if 'coffee_effect_expires_at' not in columns_coins:
                 cursor.execute("""
                     ALTER TABLE user_coins
                     ADD COLUMN coffee_effect_expires_at TIMESTAMP;
                 """)
                 log.info("已向 user_coins 表添加 coffee_effect_expires_at 列。")
 
+            if 'has_withered_sunflower' not in columns_coins:
+                cursor.execute("""
+                    ALTER TABLE user_coins
+                    ADD COLUMN has_withered_sunflower BOOLEAN NOT NULL DEFAULT 0;
+                """)
+                log.info("已向 user_coins 表添加 has_withered_sunflower 列。")
+
+            if 'blocks_thread_replies' not in columns_coins:
+                cursor.execute("""
+                    ALTER TABLE user_coins
+                    ADD COLUMN blocks_thread_replies BOOLEAN NOT NULL DEFAULT 0;
+                """)
+                log.info("已向 user_coins 表添加 blocks_thread_replies 列。")
+
             # 个人记忆功能的'memory_feature_unlocked'列已迁移至'users'表，此处不再需要
             # 保留此注释以作记录
+
+            # --- 聊天CD与功能开关 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS global_chat_config (
+                    guild_id INTEGER PRIMARY KEY,
+                    chat_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    warm_up_enabled BOOLEAN NOT NULL DEFAULT 1
+                );
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS channel_chat_config (
+                    config_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    entity_id INTEGER NOT NULL, -- 频道ID或分类ID
+                    entity_type TEXT NOT NULL, -- 'channel' or 'category'
+                    is_chat_enabled BOOLEAN, -- 可空，为空则继承上级或全局
+                    cooldown_seconds INTEGER, -- 可空
+                    UNIQUE(guild_id, entity_id)
+                );
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_channel_cooldown (
+                    user_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    last_message_timestamp TIMESTAMP NOT NULL,
+                    PRIMARY KEY (user_id, channel_id)
+                );
+            """)
+            
+            # --- 新增：频率限制CD的时间戳记录表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_channel_timestamps (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    timestamp TEXT NOT NULL
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_channel_ts ON user_channel_timestamps (user_id, channel_id, timestamp)")
+
+            # --- 扩展 channel_chat_config 以支持频率限制 ---
+            cursor.execute("PRAGMA table_info(channel_chat_config);")
+            column_names_config = [info[1] for info in cursor.fetchall()]
+            if 'cooldown_duration' not in column_names_config:
+                cursor.execute("ALTER TABLE channel_chat_config ADD COLUMN cooldown_duration INTEGER;")
+                log.info("已向 channel_chat_config 表添加 cooldown_duration 列。")
+            if 'cooldown_limit' not in column_names_config:
+                cursor.execute("ALTER TABLE channel_chat_config ADD COLUMN cooldown_limit INTEGER;")
+                log.info("已向 channel_chat_config 表添加 cooldown_limit 列。")
 
             conn.commit()
             log.info(f"数据库表在 {self.db_path} 同步初始化成功。")
@@ -522,6 +588,92 @@ class ChatDatabaseManager:
         except sqlite3.OperationalError as e:
             log.error(f"更新用户 {user_id} 的个人记忆摘要失败: {e}")
             raise
+
+    # --- 聊天设置管理 ---
+
+    async def get_global_chat_config(self, guild_id: int) -> Optional[sqlite3.Row]:
+        """获取服务器的全局聊天配置。"""
+        query = "SELECT * FROM global_chat_config WHERE guild_id = ?"
+        return await self._execute(self._db_transaction, query, (guild_id,), fetch="one")
+
+    async def update_global_chat_config(self, guild_id: int, chat_enabled: Optional[bool] = None, warm_up_enabled: Optional[bool] = None) -> None:
+        """更新或创建服务器的全局聊天配置。"""
+        updates = {}
+        if chat_enabled is not None:
+            updates['chat_enabled'] = chat_enabled
+        if warm_up_enabled is not None:
+            updates['warm_up_enabled'] = warm_up_enabled
+        
+        if not updates:
+            return
+
+        set_clause = ", ".join([f"{key} = ?" for key in updates.keys()])
+        params = list(updates.values())
+        
+        query = f"""
+            INSERT INTO global_chat_config (guild_id, {', '.join(updates.keys())})
+            VALUES (?, {', '.join(['?'] * len(params))})
+            ON CONFLICT(guild_id) DO UPDATE SET
+            {set_clause};
+        """
+        await self._execute(self._db_transaction, query, (guild_id, *params, *params), commit=True)
+        await self._execute(self._db_transaction, query, (guild_id, *params, *params), commit=True)
+        log.info(f"已更新服务器 {guild_id} 的全局聊天配置: {updates}")
+
+    async def get_channel_config(self, guild_id: int, entity_id: int) -> Optional[sqlite3.Row]:
+        """获取特定频道或分类的聊天配置。"""
+        query = "SELECT * FROM channel_chat_config WHERE guild_id = ? AND entity_id = ?"
+        return await self._execute(self._db_transaction, query, (guild_id, entity_id), fetch="one")
+
+    async def get_all_channel_configs_for_guild(self, guild_id: int) -> List[sqlite3.Row]:
+        """获取服务器内所有特定频道/分类的配置。"""
+        query = "SELECT * FROM channel_chat_config WHERE guild_id = ?"
+        return await self._execute(self._db_transaction, query, (guild_id,), fetch="all")
+
+    async def update_channel_config(self, guild_id: int, entity_id: int, entity_type: str, is_chat_enabled: Optional[bool], cooldown_seconds: Optional[int], cooldown_duration: Optional[int], cooldown_limit: Optional[int]) -> None:
+        """更新或创建频道/分类的聊天配置，支持两种CD模式。"""
+        query = """
+            INSERT INTO channel_chat_config (guild_id, entity_id, entity_type, is_chat_enabled, cooldown_seconds, cooldown_duration, cooldown_limit)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, entity_id) DO UPDATE SET
+                entity_type = excluded.entity_type,
+                is_chat_enabled = excluded.is_chat_enabled,
+                cooldown_seconds = excluded.cooldown_seconds,
+                cooldown_duration = excluded.cooldown_duration,
+                cooldown_limit = excluded.cooldown_limit;
+        """
+        params = (guild_id, entity_id, entity_type, is_chat_enabled, cooldown_seconds, cooldown_duration, cooldown_limit)
+        await self._execute(self._db_transaction, query, params, commit=True)
+        log.info(f"已更新服务器 {guild_id} 的实体 {entity_id} ({entity_type}) 的聊天配置。")
+
+    async def get_user_cooldown(self, user_id: int, channel_id: int) -> Optional[sqlite3.Row]:
+        """获取用户的最后消息时间戳。"""
+        query = "SELECT last_message_timestamp FROM user_channel_cooldown WHERE user_id = ? AND channel_id = ?"
+        return await self._execute(self._db_transaction, query, (user_id, channel_id), fetch="one")
+
+    async def update_user_cooldown(self, user_id: int, channel_id: int) -> None:
+        """更新用户的最后消息时间戳。"""
+        query = """
+            INSERT INTO user_channel_cooldown (user_id, channel_id, last_message_timestamp)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, channel_id) DO UPDATE SET
+                last_message_timestamp = CURRENT_TIMESTAMP;
+        """
+        await self._execute(self._db_transaction, query, (user_id, channel_id), commit=True)
+
+    async def add_user_timestamp(self, user_id: int, channel_id: int) -> None:
+        """为频率限制系统记录一条新的消息时间戳。"""
+        query = "INSERT INTO user_channel_timestamps (user_id, channel_id, timestamp) VALUES (?, ?, CURRENT_TIMESTAMP)"
+        await self._execute(self._db_transaction, query, (user_id, channel_id), commit=True)
+
+    async def get_user_timestamps_in_window(self, user_id: int, channel_id: int, window_seconds: int) -> List[sqlite3.Row]:
+        """获取用户在指定时间窗口内的所有消息时间戳。"""
+        query = """
+            SELECT timestamp FROM user_channel_timestamps
+            WHERE user_id = ? AND channel_id = ? AND timestamp >= datetime('now', ?)
+        """
+        time_modifier = f'-{window_seconds} seconds'
+        return await self._execute(self._db_transaction, query, (user_id, channel_id, time_modifier), fetch="all")
 
 # --- 单例实例 ---
 chat_db_manager = ChatDatabaseManager()
