@@ -389,19 +389,34 @@ class CoinService:
                 await chat_db_manager._execute(_transaction)
                 return True, f"你使用了 **{item['name']}**，枯萎的向日葵恢复了生机。类脑娘现在会重新暖你的贴了。", new_balance, False, False
             elif item_effect == ENABLE_THREAD_REPLIES_EFFECT_ID:
-                # 购买“通行许可”，重新启用帖子回复
+                # 购买“通行许可”，重新启用帖子回复并设置默认CD
                 def _transaction():
                     import sqlite3
                     conn = sqlite3.connect(chat_db_manager.db_path)
                     cursor = conn.cursor()
                     try:
-                        cursor.execute("UPDATE user_coins SET blocks_thread_replies = 0 WHERE user_id = ?", (user_id,))
+                        # 设置默认值：60秒2次
+                        default_limit = 2
+                        default_duration = 60
+                        
+                        cursor.execute("""
+                            INSERT INTO user_coins (user_id, blocks_thread_replies, thread_cooldown_limit, thread_cooldown_duration, thread_cooldown_seconds)
+                            VALUES (?, 0, ?, ?, NULL)
+                            ON CONFLICT(user_id) DO UPDATE SET
+                                blocks_thread_replies = 0,
+                                thread_cooldown_limit = excluded.thread_cooldown_limit,
+                                thread_cooldown_duration = excluded.thread_cooldown_duration,
+                                thread_cooldown_seconds = NULL;
+                        """, (user_id, default_limit, default_duration))
+                        
                         conn.commit()
-                        log.info(f"用户 {user_id} 购买了通行许可，已重新启用帖子回复功能。")
+                        log.info(f"用户 {user_id} 购买了通行许可，已重新启用帖子回复功能，并设置默认冷却 (limit={default_limit}, duration={default_duration})。")
                     finally:
                         conn.close()
+                
                 await chat_db_manager._execute(_transaction)
-                return True, f"你使用了 **{item['name']}**，告示牌被收了起来。类脑娘现在可以再次进入你的帖子了。", new_balance, False, False
+                
+                return True, f"你使用了 **{item['name']}**，花费了 {total_cost} 类脑币。现在你创建的所有帖子将默认拥有 **60秒2次** 的发言许可，你也可以随时通过弹出的窗口自定义规则。", new_balance, True, False
             else:
                 # 其他未知效果，暂时先放入背包
                 await self._add_item_to_inventory(user_id, item_id, quantity)

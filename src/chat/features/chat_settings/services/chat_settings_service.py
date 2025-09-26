@@ -1,3 +1,4 @@
+import discord
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 from src.chat.utils.database import chat_db_manager
@@ -56,11 +57,15 @@ class ChatSettingsService:
         config = await self.db_manager.get_global_chat_config(guild_id)
         return config['warm_up_enabled'] if config else True
         
-    async def get_effective_channel_config(self, guild_id: int, channel_id: int, channel_category_id: Optional[int]) -> Dict[str, Any]:
+    async def get_effective_channel_config(self, channel: discord.abc.GuildChannel) -> Dict[str, Any]:
         """
         获取频道的最终生效配置。
-        优先级: 频道特定设置 > 分类设置 > 全局默认（代码中定义）
+        优先级: 帖子主人设置 > 频道特定设置 > 分类设置 > 全局默认
         """
+        guild_id = channel.guild.id
+        channel_id = channel.id
+        channel_category_id = channel.category_id if hasattr(channel, 'category_id') else None
+
         # 默认配置
         effective_config = {
             "is_chat_enabled": True,
@@ -96,6 +101,26 @@ class ChatSettingsService:
             if channel_config['cooldown_limit'] is not None:
                 effective_config['cooldown_limit'] = channel_config['cooldown_limit']
         
+        # 3. 如果是帖子，获取并应用帖子主人的个人设置 (最高优先级)
+        if isinstance(channel, discord.Thread) and channel.owner_id:
+            owner_id = channel.owner_id
+            query = "SELECT thread_cooldown_seconds, thread_cooldown_duration, thread_cooldown_limit FROM user_coins WHERE user_id = ?"
+            owner_config_row = await self.db_manager._execute(self.db_manager._db_transaction, query, (owner_id,), fetch="one")
+
+            if owner_config_row:
+                # 个人设置不包含 is_chat_enabled，只覆盖CD
+                has_personal_fixed_cd = owner_config_row['thread_cooldown_seconds'] is not None
+                has_personal_freq_cd = owner_config_row['thread_cooldown_duration'] is not None and owner_config_row['thread_cooldown_limit'] is not None
+
+                if has_personal_fixed_cd:
+                    effective_config['cooldown_seconds'] = owner_config_row['thread_cooldown_seconds']
+                    effective_config['cooldown_duration'] = None
+                    effective_config['cooldown_limit'] = None
+                elif has_personal_freq_cd:
+                    effective_config['cooldown_seconds'] = 0
+                    effective_config['cooldown_duration'] = owner_config_row['thread_cooldown_duration']
+                    effective_config['cooldown_limit'] = owner_config_row['thread_cooldown_limit']
+
         return effective_config
 
     async def is_user_on_cooldown(self, user_id: int, channel_id: int, config: Dict[str, Any]) -> bool:

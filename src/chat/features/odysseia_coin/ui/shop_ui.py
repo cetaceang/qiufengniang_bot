@@ -6,7 +6,9 @@ from typing import List, Dict, Any
 
 from discord.ext import commands
 
-from src.chat.features.odysseia_coin.service.coin_service import coin_service, PERSONAL_MEMORY_ITEM_EFFECT_ID, WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID, COMMUNITY_MEMBER_UPLOAD_EFFECT_ID
+from src.chat.features.odysseia_coin.service.coin_service import coin_service, PERSONAL_MEMORY_ITEM_EFFECT_ID, WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID, COMMUNITY_MEMBER_UPLOAD_EFFECT_ID, ENABLE_THREAD_REPLIES_EFFECT_ID
+from src.chat.features.chat_settings.ui.channel_settings_modal import ChatSettingsModal
+from src.chat.utils.database import chat_db_manager
 from src.chat.features.personal_memory.services.personal_memory_service import personal_memory_service
 from src.chat.features.world_book.services.world_book_service import world_book_service
 from src.chat.config import chat_config
@@ -340,7 +342,7 @@ class PurchaseButton(discord.ui.Button):
         """处理普通商品的购买"""
         await interaction.response.defer(ephemeral=True)
         try:
-            success, message, new_balance, _, should_generate_gift_response = await coin_service.purchase_item(
+            success, message, new_balance, should_show_modal, should_generate_gift_response = await coin_service.purchase_item(
                 interaction.user.id,
                 interaction.guild.id if interaction.guild else 0,
                 item['item_id']
@@ -365,16 +367,74 @@ class PurchaseButton(discord.ui.Button):
                 except discord.errors.Forbidden:
                     log.error(f"Failed to send DM to user {interaction.user.id} as a fallback.")
 
-
             if success:
                 self.view.balance = new_balance
                 new_embed = self.view.create_shop_embed()
                 await interaction.edit_original_response(embed=new_embed, view=self.view)
 
+                if should_show_modal and item.get('effect_id') == ENABLE_THREAD_REPLIES_EFFECT_ID:
+                    await self.handle_thread_settings_modal(interaction)
+
         except Exception as e:
             log.error(f"处理购买商品 {item['item_id']} 时出错: {e}", exc_info=True)
             if not interaction.response.is_done():
                 await interaction.followup.send("处理你的购买请求时发生了一个意想不到的错误。", ephemeral=True)
+
+    async def handle_thread_settings_modal(self, interaction: discord.Interaction):
+        """处理购买“通行许可”后弹出的帖子冷却设置模态框"""
+        try:
+            # 1. 获取用户当前的设置作为默认值
+            user_settings_query = "SELECT thread_cooldown_seconds, thread_cooldown_duration, thread_cooldown_limit FROM user_coins WHERE user_id = ?"
+            user_settings_row = await chat_db_manager._execute(chat_db_manager._db_transaction, user_settings_query, (interaction.user.id,), fetch="one")
+            
+            current_config = {}
+            if user_settings_row:
+                current_config = {
+                    'cooldown_seconds': user_settings_row['thread_cooldown_seconds'],
+                    'cooldown_duration': user_settings_row['thread_cooldown_duration'],
+                    'cooldown_limit': user_settings_row['thread_cooldown_limit']
+                }
+
+            # 2. 定义模态框提交后的回调函数
+            async def modal_callback(modal_interaction: discord.Interaction, settings: Dict[str, Any]):
+                await chat_db_manager.update_user_thread_cooldown_settings(interaction.user.id, settings)
+                await modal_interaction.response.send_message("✅ 你的个人帖子冷却设置已保存！", ephemeral=True)
+
+            # 3. 创建并发送模态框
+            modal = ChatSettingsModal(
+                title="设置你的帖子默认冷却",
+                current_config=current_config,
+                on_submit_callback=modal_callback,
+                include_enable_option=False  # 不需要“启用/禁用”选项
+            )
+            
+            # 使用 followup 发送一个新的交互响应，因为原始交互已经响应过了
+            # 注意：Discord UI 的限制，我们不能在一个已经响应的交互上再发送一个模态框
+            # 因此，这里我们直接在 followup 消息中发送模态框，但这通常不被支持。
+            # 一个更好的方法是发送一条新消息，带有一个按钮，点击按钮弹出模态框。
+            # 但为了简化流程，我们先尝试直接发送。如果不行，就需要调整。
+            # 经过测试，直接在 followup 中发送模态框是不可行的。
+            # 正确的做法是，让购买按钮的回调函数不 defer，而是直接 response.send_modal()
+            # 但这会改变整个购买流程的结构。
+            #
+            # 折中方案：发送一条带按钮的新消息。
+            
+            view = discord.ui.View(timeout=180)
+            button = discord.ui.Button(label="点此设置帖子冷却", style=discord.ButtonStyle.primary)
+
+            async def button_callback(button_interaction: discord.Interaction):
+                await button_interaction.response.send_modal(modal)
+                button.disabled = True
+                await button_interaction.edit_original_response(view=view)
+
+            button.callback = button_callback
+            view.add_item(button)
+            
+            await interaction.followup.send("请点击下方按钮来配置你的帖子或子区里类脑娘的活跃时间,默认是1分钟两次哦", view=view, ephemeral=True)
+
+        except Exception as e:
+            log.error(f"为用户 {interaction.user.id} 显示帖子冷却设置模态框时出错: {e}", exc_info=True)
+            await interaction.followup.send("❌ 打开设置界面时遇到问题，但你的购买已成功。请联系管理员。", ephemeral=True)
 
 class RefreshBalanceButton(discord.ui.Button):
     """刷新余额按钮"""

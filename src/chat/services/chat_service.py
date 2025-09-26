@@ -35,8 +35,7 @@ class ChatService:
             return False
 
         # 2. 频道/分类设置检查
-        channel_category_id = getattr(message.channel, 'category_id', None)
-        effective_config = await chat_settings_service.get_effective_channel_config(guild_id, message.channel.id, channel_category_id)
+        effective_config = await chat_settings_service.get_effective_channel_config(message.channel)
 
         if not effective_config.get('is_chat_enabled', True):
             # 检查是否满足通行许可的例外条件
@@ -62,12 +61,6 @@ class ChatService:
             log.info(f"用户 {author.id} 在服务器 {guild_id} 被拉黑，跳过前置检查。")
             return False
             
-        # 5. 旧版冷却检查
-        cooldown_type = await coin_service.get_user_cooldown_type(author.id)
-        if await gemini_service.is_user_on_cooldown(author.id, cooldown_type):
-            log.info(f"用户 {author.id} 处于奥德赛币冷却状态，跳过前置检查。")
-            return False
-
         return True
 
     async def handle_chat_message(self, message: discord.Message, processed_data: Dict[str, Any]) -> str:
@@ -85,8 +78,7 @@ class ChatService:
         guild_id = message.guild.id if message.guild else 0
 
         # --- 获取最新的有效配置 ---
-        channel_category_id = getattr(message.channel, 'category_id', None)
-        effective_config = await chat_settings_service.get_effective_channel_config(guild_id, message.channel.id, channel_category_id)
+        effective_config = await chat_settings_service.get_effective_channel_config(message.channel)
 
         # --- 个人记忆消息计数 ---
         # --- 个人记忆处理 ---
@@ -121,9 +113,6 @@ class ChatService:
         image_data_list = processed_data["image_data_list"]
 
         try:
-            # 获取旧版冷却类型，以传递给AI服务
-            cooldown_type = await coin_service.get_user_cooldown_type(author.id)
-
             # 2. --- 上下文与知识库检索 ---
             # 获取频道历史上下文
             # 使用新的测试上下文服务
@@ -168,8 +157,7 @@ class ChatService:
                 user_name=author.display_name,
                 channel_context=channel_context,
                 world_book_entries=world_book_entries,
-                personal_summary=personal_summary,
-                cooldown_type=cooldown_type
+                personal_summary=personal_summary
             )
 
             if not ai_response:

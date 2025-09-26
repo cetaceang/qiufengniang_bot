@@ -117,33 +117,6 @@ class GeminiService:
         return []
 
     # --- Refactored Cooldown Logic ---
-    def _get_cooldown_status(self, user_id: int, cooldown_type: str) -> tuple[int, int]:
-        """获取用户的冷却状态（请求数和限制数），并清理旧的时间戳。"""
-        now = datetime.now(timezone.utc)
-        rate_limit = app_config.COOLDOWN_RATES.get(cooldown_type, app_config.COOLDOWN_RATES["default"])
-
-        timestamps = [
-            ts for ts in self.user_request_timestamps.get(user_id, [])
-            if now - ts < timedelta(minutes=1)
-        ]
-        self.user_request_timestamps[user_id] = timestamps
-        return len(timestamps), rate_limit
-
-    async def _check_and_update_cooldown(self, user_id: int, cooldown_type: str = "default") -> bool:
-        """检查并更新用户的冷却状态。"""
-        current_requests, rate_limit = self._get_cooldown_status(user_id, cooldown_type)
-
-        if current_requests >= rate_limit:
-            log.warning(f"用户 {user_id} 触发了 {cooldown_type} 冷却限制。")
-            return False
-        
-        self.user_request_timestamps.setdefault(user_id, []).append(datetime.now(timezone.utc))
-        return True
-
-    async def is_user_on_cooldown(self, user_id: int, cooldown_type: str = "default") -> bool:
-        """仅检查用户是否处于冷却状态，不更新时间戳。"""
-        current_requests, rate_limit = self._get_cooldown_status(user_id, cooldown_type)
-        return current_requests >= rate_limit
 
     # --- Static Helper Methods for Serialization ---
     @staticmethod
@@ -278,22 +251,7 @@ class GeminiService:
         async def wrapper(self: 'GeminiService', *args, **kwargs):
             # --- 新逻辑：将冷却检查移入装饰器，并使其仅对特定函数生效 ---
             
-            # 检查被装饰的函数是否需要用户冷却逻辑
             is_chat_request = func.__name__ == 'generate_response'
-
-            if is_chat_request:
-                user_id = args[0] if args else kwargs.get('user_id')
-                cooldown_type = kwargs.get('cooldown_type', 'default')
-
-                if not isinstance(user_id, int):
-                    log.error(f"无法从参数中为 {func.__name__} 提取有效的 user_id。")
-                    # 对于聊天请求，返回 None 或错误消息是合适的
-                    return "抱歉，处理您的请求时发生了一个内部错误。"
-
-                # 1. 检查先行：在任何操作之前，先检查用户是否已处于冷却状态。
-                if await self.is_user_on_cooldown(user_id, cooldown_type):
-                    log.warning(f"用户 {user_id} 在进入API密钥处理前已触发 {cooldown_type} 冷却限制。")
-                    return None # 直接返回，不进入密钥轮询
 
             last_exception = None
             
@@ -318,9 +276,6 @@ class GeminiService:
                             result = await func(self, *args, client=client, **kwargs)
                             
                             # 5. 如果成功，记账、释放密钥并立即返回结果
-                            if is_chat_request:
-                                # --- 新逻辑：仅在成功时且为聊天请求时更新冷却计数 ---
-                                self.user_request_timestamps.setdefault(user_id, []).append(datetime.now(timezone.utc))
                             
                             await self.key_rotation_service.release_key(key_obj.key, success=True)
                             return result
@@ -380,8 +335,7 @@ class GeminiService:
                                   images: Optional[List[Dict]] = None, user_name: str = "用户",
                                   channel_context: Optional[List[Dict]] = None,
                                   world_book_entries: Optional[List[Dict]] = None,
-                                  personal_summary: Optional[str] = None,
-                                  cooldown_type: str = "default", client: Any = None) -> str:
+                                  personal_summary: Optional[str] = None, client: Any = None) -> str:
         """生成AI回复（已重构）。"""
         # --- 新逻辑：冷却检查已移至装饰器，此处不再需要 ---
         # 装饰器会处理密钥和客户端的创建，这里我们直接使用

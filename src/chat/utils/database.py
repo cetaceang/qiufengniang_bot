@@ -230,6 +230,18 @@ class ChatDatabaseManager:
                 """)
                 log.info("已向 user_coins 表添加 blocks_thread_replies 列。")
 
+            if 'thread_cooldown_seconds' not in columns_coins:
+                cursor.execute("ALTER TABLE user_coins ADD COLUMN thread_cooldown_seconds INTEGER;")
+                log.info("已向 user_coins 表添加 thread_cooldown_seconds 列。")
+            
+            if 'thread_cooldown_duration' not in columns_coins:
+                cursor.execute("ALTER TABLE user_coins ADD COLUMN thread_cooldown_duration INTEGER;")
+                log.info("已向 user_coins 表添加 thread_cooldown_duration 列。")
+
+            if 'thread_cooldown_limit' not in columns_coins:
+                cursor.execute("ALTER TABLE user_coins ADD COLUMN thread_cooldown_limit INTEGER;")
+                log.info("已向 user_coins 表添加 thread_cooldown_limit 列。")
+
             # 个人记忆功能的'memory_feature_unlocked'列已迁移至'users'表，此处不再需要
             # 保留此注释以作记录
 
@@ -674,6 +686,31 @@ class ChatDatabaseManager:
         """
         time_modifier = f'-{window_seconds} seconds'
         return await self._execute(self._db_transaction, query, (user_id, channel_id, time_modifier), fetch="all")
+
+    async def update_user_thread_cooldown_settings(self, user_id: int, settings: Dict[str, Any]) -> None:
+        """更新用户的个人帖子默认冷却设置。"""
+        # 确保用户记录存在
+        await self._execute(self._db_transaction,
+                            "INSERT OR IGNORE INTO user_coins (user_id) VALUES (?)",
+                            (user_id,),
+                            commit=True)
+
+        query = """
+            UPDATE user_coins
+            SET
+                thread_cooldown_seconds = ?,
+                thread_cooldown_duration = ?,
+                thread_cooldown_limit = ?
+            WHERE user_id = ?
+        """
+        params = (
+            settings.get('cooldown_seconds'),
+            settings.get('cooldown_duration'),
+            settings.get('cooldown_limit'),
+            user_id
+        )
+        await self._execute(self._db_transaction, query, params, commit=True)
+        log.info(f"已更新用户 {user_id} 的个人帖子冷却设置: {settings}")
 
 # --- 单例实例 ---
 chat_db_manager = ChatDatabaseManager()
