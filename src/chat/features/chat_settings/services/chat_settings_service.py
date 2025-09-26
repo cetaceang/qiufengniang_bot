@@ -64,7 +64,12 @@ class ChatSettingsService:
         """
         guild_id = channel.guild.id
         channel_id = channel.id
-        channel_category_id = channel.category_id if hasattr(channel, 'category_id') else None
+        
+        # 修正：对于帖子（Thread），应从其父频道获取分类ID
+        if isinstance(channel, discord.Thread):
+            channel_category_id = channel.parent.category_id if channel.parent else None
+        else:
+            channel_category_id = channel.category_id if hasattr(channel, 'category_id') else None
 
         # 默认配置
         effective_config = {

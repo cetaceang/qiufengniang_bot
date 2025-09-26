@@ -41,10 +41,19 @@ class ChatService:
             # 检查是否满足通行许可的例外条件
             pass_is_granted = False
             if isinstance(message.channel, discord.Thread) and message.channel.owner_id:
-                # 如果帖主没有设置“阻止回复”（即拥有通行许可），则授予通行权
-                if not await coin_service.blocks_thread_replies(message.channel.owner_id):
-                    pass_is_granted = True
-                    log.info(f"帖主 {message.channel.owner_id} 拥有通行许可，覆盖频道 {message.channel.id} 的聊天限制。")
+                # 修正逻辑：只有当帖主明确设置了个人CD时，才算拥有“通行许可”
+                owner_id = message.channel.owner_id
+                query = "SELECT thread_cooldown_seconds, thread_cooldown_duration, thread_cooldown_limit FROM user_coins WHERE user_id = ?"
+                owner_config_row = await chat_db_manager._execute(chat_db_manager._db_transaction, query, (owner_id,), fetch="one")
+
+                if owner_config_row:
+                    has_personal_cd = (
+                        owner_config_row['thread_cooldown_seconds'] is not None or
+                        (owner_config_row['thread_cooldown_duration'] is not None and owner_config_row['thread_cooldown_limit'] is not None)
+                    )
+                    if has_personal_cd:
+                        pass_is_granted = True
+                        log.info(f"帖主 {owner_id} 拥有个人CD设置（通行许可），覆盖频道 {message.channel.id} 的聊天限制。")
 
             # 如果没有授予通行权，则按原逻辑返回 False
             if not pass_is_granted:
