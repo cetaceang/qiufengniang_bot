@@ -99,9 +99,11 @@ class MessageProcessor:
                 ref_msg = await message.channel.fetch_message(message.reference.message_id)
                 if ref_msg and ref_msg.author:
                     # 清理被回复消息的文本
+                    log.debug(f"原始 display_name (message_processor): '{ref_msg.author.display_name}'")
                     ref_content_cleaned = self._clean_message_content(ref_msg.content, ref_msg.mentions, bot_user)
                     # 采用新的引用格式，以解决AI主语混淆问题
                     replied_message_content = f'> 回复 [{ref_msg.author.display_name}:{ref_content_cleaned}]\n\n'
+                    log.debug(f"处理后的 replied_message_content: '{replied_message_content}'")
                     
                     # 提取被回复消息中的图片
                     if ref_msg.attachments:
@@ -152,6 +154,9 @@ class MessageProcessor:
         """
         清理消息内容，将对自身的@mention替换为名字，并移除其他@mention。
         """
+        # 还原 Discord 为了 Markdown 显示而自动添加的转义
+        content = content.replace('\\_', '_')
+        
         # 处理所有@mention
         for user in mentions:
             mention_str_1 = f'<@{user.id}>'

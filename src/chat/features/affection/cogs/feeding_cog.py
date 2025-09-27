@@ -76,17 +76,26 @@ class FeedingCog(commands.Cog):
                 coin_gain = int(match.group(3))
 
             await self.affection_service.add_affection_points(user_id, guild_id, affection_gain)
-            await self.coin_service.add_coins(user_id, coin_gain, reason="投喂奖励")
+
+            # 只有当 coin_gain 是正数时才增加类脑币
+            if coin_gain > 0:
+                await self.coin_service.add_coins(user_id, coin_gain, reason="投喂奖励")
 
             # 替换表情并添加奖励消息
             evaluation_with_emojis = replace_emojis(evaluation)
             
-            # 格式化系统提示
-            system_message = f"> 你获得了 {coin_gain} 枚类脑币！"
+            # 格式化系统提示，仅在获得奖励时显示
+            system_message = ""
+            if coin_gain > 0:
+                system_message = f"> 你获得了 {coin_gain} 枚类脑币！"
             
             # 创建 Embed
+            embed_description = evaluation_with_emojis
+            if system_message:
+                embed_description += f"\n\n{system_message}"
+            
             embed = discord.Embed(
-                description=f"{evaluation_with_emojis}\n\n{system_message}",
+                description=embed_description,
                 color=discord.Color.pink()  # 你可以自定义颜色
             )
             

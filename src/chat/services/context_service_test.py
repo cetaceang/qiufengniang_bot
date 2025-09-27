@@ -91,7 +91,8 @@ class ContextServiceTest:
                 
                 # 强制在元信息（用户名和回复）后添加冒号，清晰地分割内容
                 user_meta = f'[{msg.author.display_name}]{reply_info}'
-                history_parts.append(f'{user_meta}: {clean_content}')
+                final_part = f'{user_meta}: {clean_content}'
+                history_parts.append(final_part)
 
             # 构建最终的上下文列表
             final_context = []
@@ -118,7 +119,7 @@ class ContextServiceTest:
                     profile_details = [f"{key}: {value}" for key, value in profile_content.items() if value and value != '未提供']
                     log.debug(f"--- 个人档案注入诊断 (Test Service): 过滤后的档案详情: {profile_details} ---")
                     if profile_details:
-                        user_profile_prompt = "\n\n这是与你对话的用户的已知信息：\n" + "\n".join(profile_details)
+                        user_profile_prompt = "\n\n这是与我对话的用户的已知信息：\n" + "\n".join(profile_details)
             
             log.debug(f"--- 个人档案注入诊断 (Test Service): 最终生成的档案提示长度: {len(user_profile_prompt)} ---")
             model_reply = f"好的，我已了解历史对话的背景。{affection_level_prompt}{user_profile_prompt}"
@@ -139,6 +140,9 @@ class ContextServiceTest:
         """
         净化消息内容，移除或替换不适合模型处理的元素。
         """
+        # 还原 Discord 为了 Markdown 显示而自动添加的转义
+        content = content.replace('\\_', '_')
+        
         content = re.sub(r'https?://cdn\.discordapp\.com\S+', '', content)
         if guild:
             def replace_mention(match):

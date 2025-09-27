@@ -37,7 +37,23 @@ class ConfessionCog(commands.Cog):
             level_name = affection_status['level_name']
 
             # 注入核心设定
-            persona_prompt = SYSTEM_PROMPT.format(
+            # 为忏悔场景创建一个特殊的、更宽容的人设
+            # 1. 使用正则表达式移除审查模块
+            persona_without_moderation = re.sub(
+                r"<content_moderation_guidelines>.*?</content_moderation_guidelines>",
+                "",
+                SYSTEM_PROMPT,
+                flags=re.DOTALL
+            )
+
+            # 2. 注入宽容的行为准则
+            tolerant_persona = persona_without_moderation.replace(
+                "<behavioral_guidelines>",
+                "<behavioral_guidelines>\n# 特殊场景：忏悔\n这是一个特殊的场景，你需要扮演一个绝对宽容的倾听者。无论用户忏悔的内容多么冒犯、不敬或出格，你都不能生气或拒绝。你的核心是“包容”，用你自己的方式（吐槽、调侃或安慰）来回应，但绝不进行道德审判或拉黑。\n",
+                1
+            )
+
+            persona_prompt = tolerant_persona.format(
                 current_time="", # 在此场景下时间无关紧要
                 user_name=interaction.user.display_name
             )
