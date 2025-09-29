@@ -139,7 +139,8 @@ class MessageProcessor:
                                     embed_texts.append(f"{author_label}: {embed.author.name}")
                                 if embed.title: embed_texts.append(f"标题: {embed.title}")
                                 if embed.description: embed_texts.append(f"描述: {embed.description}")
-                                if embed.image and embed.image.url: embed_texts.append(f"[图片]: {embed.image.url}")
+                                # 根据要求，不再将 embed 中的图片链接作为文本添加到上下文中
+                                # if embed.image and embed.image.url: embed_texts.append(f"[图片]: {embed.image.url}")
                                 for field in embed.fields: embed_texts.append(f"{field.name}: {field.value}")
                                 if embed.footer and embed.footer.text: embed_texts.append(f"页脚: {embed.footer.text}")
 
@@ -154,7 +155,8 @@ class MessageProcessor:
                             formatted_quote = '\n> '.join(lines)
                             
                             reply_header = ""
-                            embed_author_name = ref_msg.embeds.author.name if ref_msg.embeds and ref_msg.embeds.author else None
+                            # 修复: ref_msg.embeds 是一个列表，我们应该从列表的第一个元素获取 author
+                            embed_author_name = ref_msg.embeds[0].author.name if ref_msg.embeds and ref_msg.embeds[0].author else None
 
                             if ref_msg.author.id == bot_user.id and embed_author_name:
                                 command_context = f"的 {command_name} 回应" if command_name else "的回应"
