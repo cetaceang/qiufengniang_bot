@@ -11,8 +11,8 @@ from src.chat.services.gemini_service import gemini_service
 from src.chat.config.prompts import SYSTEM_PROMPT
 from src.chat.config.chat_config import FEEDING_CONFIG
 from src.chat.utils.prompt_utils import extract_persona_prompt, replace_emojis
+from src.config import DEVELOPER_USER_IDS
 import logging
-import random
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +30,13 @@ class FeedingCog(commands.Cog):
         user_id = str(interaction.user.id)
         guild_id = str(interaction.guild.id)
 
-        # 使用 FeedingService 检查是否可以投喂
-        can_feed, message = await self.feeding_service.can_feed(user_id)
-        if not can_feed:
-            await interaction.response.send_message(message, ephemeral=False)
-            return
+        # 检查用户是否为开发者，如果是，则绕过冷却时间检查
+        if interaction.user.id not in DEVELOPER_USER_IDS:
+            # 使用 FeedingService 检查是否可以投喂
+            can_feed, message = await self.feeding_service.can_feed(user_id)
+            if not can_feed:
+                await interaction.response.send_message(message, ephemeral=False)
+                return
 
         await interaction.response.defer(ephemeral=False)
         
@@ -99,6 +101,9 @@ class FeedingCog(commands.Cog):
                 color=discord.Color.pink()  # 你可以自定义颜色
             )
             
+            # 设置作者信息
+            embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.avatar.url)
+
             # 从配置中获取图片 URL
             image_url = FEEDING_CONFIG.get("RESPONSE_IMAGE_URL")
             if image_url:
@@ -107,6 +112,9 @@ class FeedingCog(commands.Cog):
             # 将用户上传的图片作为缩略图
             file = discord.File(fp=io.BytesIO(image_bytes), filename=image.filename)
             embed.set_thumbnail(url=f"attachment://{image.filename}")
+
+            # 添加页脚用于上下文识别
+            embed.set_footer(text="类脑娘对你的投喂做出回应...")
 
             # 记录投喂事件
             await self.feeding_service.record_feeding(user_id)

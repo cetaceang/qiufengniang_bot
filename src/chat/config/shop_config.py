@@ -14,14 +14,14 @@ from src.chat.features.odysseia_coin.service.coin_service import (
 
 SHOP_ITEMS = [
     # name, description, price, category, target, effect_id
-    ("枯萎向日葵", "购买后类脑娘不会再出现在帖子下面", 0, "物品-给自己", "self", DISABLE_THREAD_COMMENTOR_EFFECT_ID),
-    ("告示牌", "上面写着禁止通行", 0, "物品-给自己", "self", BLOCK_THREAD_REPLIES_EFFECT_ID),
-    ("魔法向日葵", "一朵充满活力的向日葵，似乎能让周围的气氛都活跃起来。", 10, "物品-给自己", "self", ENABLE_THREAD_COMMENTOR_EFFECT_ID),
-    ("通行许可", "一张官方签发的许可，撤销了之前的“禁止通行”指令。好像还可以设置类脑娘的活跃时间?", 10, "物品-给自己", "self", ENABLE_THREAD_REPLIES_EFFECT_ID),
+    ("枯萎向日葵", "购买后类脑娘不会再暖你的帖子", 0, "物品-给自己", "self", DISABLE_THREAD_COMMENTOR_EFFECT_ID),
+    ("告示牌", "上面写着禁止通行,购买后类脑娘不会在你的帖子下面对话", 0, "物品-给自己", "self", BLOCK_THREAD_REPLIES_EFFECT_ID),
+    ("魔法向日葵", "神奇的魔法向日葵!购买后类脑娘又会暖你的帖子了,友谊的魔法!。", 10, "物品-给自己", "self", ENABLE_THREAD_COMMENTOR_EFFECT_ID),
+    ("通行许可", "一张官方签发的许可,购买后类脑娘可以在你的帖子下对话.并且可以设置类脑娘的活跃时间哦", 10, "物品-给自己", "self", ENABLE_THREAD_REPLIES_EFFECT_ID),
     ("咖啡", "喝下后你感觉精力变强了一点...不过好像只有24h", 50, "食品-给自己", "self", "coffee_chat_cooldown"),
-    ("个人记忆功能", "解锁与类脑娘的专属长期记忆，让她真正地记住你。", 100, "物品-给自己", "self", PERSONAL_MEMORY_ITEM_EFFECT_ID),
+    ("名片", "输入你的信息,并解锁与类脑娘的专属长期记忆,让她真正地记住你。", 100, "物品-给自己", "self", PERSONAL_MEMORY_ITEM_EFFECT_ID),
     ("知识纸条", "写下你对社区的了解（仅限无关社区成员的信息），帮助类脑娘更好地认识世界。", 0, "物品-贡献", "self", WORLD_BOOK_CONTRIBUTION_ITEM_EFFECT_ID),
-    ("社区成员档案上传", "上传社区成员的档案信息，上传的信息将被正确识别为社区成员。", 100, "物品-贡献", "self", COMMUNITY_MEMBER_UPLOAD_EFFECT_ID),
+    ("社区成员档案上传", "上传其他社区成员的档案信息，上传的信息将被正确识别为社区成员。", 100, "物品-贡献", "self", COMMUNITY_MEMBER_UPLOAD_EFFECT_ID),
     ("草莓小蛋糕", "精致的奶油草莓蛋糕", 15, "食品-给类脑娘", "ai", None),
     ("巧克力曲奇", "香浓可口的巧克力曲奇饼干", 12, "食品-给类脑娘", "ai", None),
     ("抹茶马卡龙", "精致的法式抹茶马卡龙", 18, "食品-给类脑娘", "ai", None),

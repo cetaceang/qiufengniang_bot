@@ -84,7 +84,7 @@ class AIChatCog(commands.Cog):
         """
         try:
             # 1. 使用 MessageProcessor 处理消息
-            processed_data = await message_processor.process_message(message)
+            processed_data = await message_processor.process_message(message, self.bot)
 
             # 2. 使用 ChatService 获取AI回复
             final_response = await chat_service.handle_chat_message(message, processed_data)

@@ -96,11 +96,13 @@ AFFECTION_CONFIG = {
 
 # --- 投喂功能 ---
 FEEDING_CONFIG = {
+    "COOLDOWN_SECONDS": 10800,  # 5 minutes
     "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1418576178326802524/3_632830043818943_00001_.png" # 投喂回应的默认图片URL
 }
 
 # --- 忏悔功能 ---
 CONFESSION_CONFIG = {
+    "COOLDOWN_SECONDS": 10800,  # 10 minutes
     "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1419992658067325008/3_1124796593853479_00001_.png" # 忏悔回应的默认图片URL
 }
 

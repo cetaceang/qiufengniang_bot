@@ -9,6 +9,7 @@ from src.chat.features.affection.service.affection_service import AffectionServi
 from src.chat.features.affection.service.confession_service import ConfessionService
 from src.chat.services.gemini_service import gemini_service
 from src.chat.utils.prompt_utils import replace_emojis
+from src.config import DEVELOPER_USER_IDS
 
 class ConfessionCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -24,10 +25,12 @@ class ConfessionCog(commands.Cog):
         user_id = str(interaction.user.id)
         guild_id = str(interaction.guild.id)
 
-        can_confess, remaining_time = await self.confession_service.can_confess(user_id)
-        if not can_confess:
-            await interaction.response.send_message(f"{remaining_time}", ephemeral=True)
-            return
+        # 检查用户是否为开发者，如果是，则绕过冷却时间检查
+        if interaction.user.id not in DEVELOPER_USER_IDS:
+            can_confess, remaining_time = await self.confession_service.can_confess(user_id)
+            if not can_confess:
+                await interaction.response.send_message(f"{remaining_time}", ephemeral=True)
+                return
 
         await interaction.response.defer()
 

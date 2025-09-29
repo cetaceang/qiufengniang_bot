@@ -36,7 +36,6 @@ class MessageProcessor:
 
     async def _extract_emojis_as_images(self, content: str) -> Tuple[str, List[Dict[str, Any]]]:
         """从文本中提取自定义表情，下载图片，并用占位符替换文本"""
-        # log.debug(f"开始提取表情，接收到的内容: '{content}'")
         emoji_images = []
         tasks = []
         matches = list(EMOJI_REGEX.finditer(content))
@@ -46,18 +45,14 @@ class MessageProcessor:
 
         proxy_url = config.PROXY_URL
         async with aiohttp.ClientSession() as session:
-            # 准备所有下载任务
             for match in matches:
                 emoji_name, emoji_id = match.groups()
-                # 动态表情使用 .gif，静态使用 .png
                 extension = 'gif' if match.group(0).startswith('<a:') else 'png'
                 url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}"
                 tasks.append(asyncio.create_task(self._fetch_image_aio(session, url, proxy=proxy_url)))
 
-            # 并发执行下载
             results = await asyncio.gather(*tasks)
 
-        # 处理下载结果并替换文本
         modified_content = content
         for match, image_bytes in zip(matches, results):
             if image_bytes:
@@ -69,59 +64,119 @@ class MessageProcessor:
                     'source': 'emoji',
                     'name': emoji_name
                 })
-                # 将原始表情文本替换为带名称的占位符，帮助模型理解
                 modified_content = modified_content.replace(match.group(0), f"__EMOJI_{emoji_name}__", 1)
         
         return modified_content, emoji_images
 
-    async def process_message(self, message: discord.Message) -> Dict[str, Any]:
+    async def process_message(self, message: discord.Message, bot: discord.Client) -> Dict[str, Any]:
         """
         处理传入的 discord 消息对象。
-
-        Args:
-            message (discord.Message): 用户发送的消息。
-
-        Returns:
-            Dict[str, Any]: 一个包含 'final_content' 和 'image_data_list' 的字典。
         """
         image_data_list = []
-        # 根据用户反馈，我们不考虑私聊场景，因此可以直接从 message.guild.me 获取机器人用户对象
         bot_user = message.guild.me
 
-        # 1. 处理当前消息的图片附件
         if message.attachments:
             image_data_list.extend(await self._extract_images_from_attachments(message.attachments))
 
-        # 2. 处理被回复的消息
         replied_message_content = ""
         if message.reference and message.reference.message_id:
             try:
                 ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                if ref_msg and ref_msg.author:
-                    # 清理被回复消息的文本
-                    log.debug(f"原始 display_name (message_processor): '{ref_msg.author.display_name}'")
-                    ref_content_cleaned = self._clean_message_content(ref_msg.content, ref_msg.mentions, bot_user)
-                    # 采用新的引用格式，以解决AI主语混淆问题
-                    replied_message_content = f'> 回复 [{ref_msg.author.display_name}:{ref_content_cleaned}]\n\n'
-                    log.debug(f"处理后的 replied_message_content: '{replied_message_content}'")
-                    
-                    # 提取被回复消息中的图片
-                    if ref_msg.attachments:
-                        image_data_list.extend(await self._extract_images_from_attachments(ref_msg.attachments))
+                if ref_msg:
+                    # 核心修复：使用 'in' 和 '[]' 来访问 MessageSnapshot 的数据
+                    if hasattr(ref_msg, 'message_snapshots') and ref_msg.message_snapshots:
+                        log.debug(f"检测到消息快照，处理转发消息: {ref_msg.id}")
+                        snapshot_content_parts = []
+                        
+                        forwarder_name = ref_msg.author.display_name
+                        original_author_name = "未知作者"
+
+                        for snapshot in ref_msg.message_snapshots:
+                            # 根据 discord.py 文档，MessageSnapshot 是一个对象，必须使用属性访问。
+                            # 我们使用 hasattr() 来安全地检查属性是否存在。
+                            if hasattr(snapshot, 'author') and snapshot.author:
+                                # snapshot.author 是一个 User/Member 对象，它有 display_name 属性
+                                original_author_name = snapshot.author.display_name
+
+                            if hasattr(snapshot, 'content') and snapshot.content:
+                                snapshot_content_parts.append(snapshot.content)
+                            
+                            if hasattr(snapshot, 'embeds') and snapshot.embeds:
+                                for embed in snapshot.embeds:
+                                    # embed 是一个 Embed 对象
+                                    if embed.title: snapshot_content_parts.append(f"标题: {embed.title}")
+                                    if embed.description: snapshot_content_parts.append(f"描述: {embed.description}")
+                                    for field in embed.fields:
+                                        snapshot_content_parts.append(f"{field.name}: {field.value}")
+                            
+                            if hasattr(snapshot, 'attachments') and snapshot.attachments:
+                                # snapshot.attachments 是 Attachment 对象的列表
+                                image_data_list.extend(await self._extract_images_from_attachments(snapshot.attachments))
+
+                        snapshot_full_text = "\n".join(filter(None, snapshot_content_parts)).strip()
+                        if snapshot_full_text:
+                            lines = snapshot_full_text.split('\n')
+                            formatted_quote = '\n> '.join(lines)
+                            reply_header = f'> [回复 {forwarder_name} 转发的来自 {original_author_name} 的消息]:'
+                            replied_message_content = f'{reply_header}\n> {formatted_quote}\n\n'
+
+                    else:
+                        # 对非转发消息（包括embed命令）的常规处理
+                        command_name = None
+                        if ref_msg.embeds:
+                            for embed in ref_msg.embeds:
+                                if embed.footer and embed.footer.text:
+                                    footer_text = embed.footer.text
+                                    if "投喂" in footer_text: command_name = "/投喂"
+                                    elif "忏悔" in footer_text: command_name = "/忏悔"
+                                    break # 找到一个就够了
+
+                        embed_texts = []
+                        if ref_msg.embeds:
+                            for embed in ref_msg.embeds:
+                                if embed.author and embed.author.name:
+                                    author_label = "投喂者" if command_name == "/投喂" else "忏悔者" if command_name == "/忏悔" else "作者"
+                                    embed_texts.append(f"{author_label}: {embed.author.name}")
+                                if embed.title: embed_texts.append(f"标题: {embed.title}")
+                                if embed.description: embed_texts.append(f"描述: {embed.description}")
+                                if embed.image and embed.image.url: embed_texts.append(f"[图片]: {embed.image.url}")
+                                for field in embed.fields: embed_texts.append(f"{field.name}: {field.value}")
+                                if embed.footer and embed.footer.text: embed_texts.append(f"页脚: {embed.footer.text}")
+
+                        embed_content = "\n".join(embed_texts)
+                        ref_content_cleaned = self._clean_message_content(ref_msg.content, ref_msg.mentions, bot_user)
+                        
+                        full_ref_content = [ref for ref in [ref_content_cleaned, embed_content] if ref]
+                        combined_content = "\n".join(full_ref_content).strip()
+
+                        if combined_content:
+                            lines = combined_content.split('\n')
+                            formatted_quote = '\n> '.join(lines)
+                            
+                            reply_header = ""
+                            embed_author_name = ref_msg.embeds.author.name if ref_msg.embeds and ref_msg.embeds.author else None
+
+                            if ref_msg.author.id == bot_user.id and embed_author_name:
+                                command_context = f"的 {command_name} 回应" if command_name else "的回应"
+                                reply_header = f'> [类脑娘对 {embed_author_name} {command_context}]:'
+                            else:
+                                reply_header = f'> [回复 {ref_msg.author.display_name}]:'
+
+                            replied_message_content = f'{reply_header}\n> {formatted_quote}\n\n'
+
+                        if ref_msg.attachments:
+                            image_data_list.extend(await self._extract_images_from_attachments(ref_msg.attachments))
+
             except (discord.NotFound, discord.Forbidden):
                 log.warning(f"无法找到或无权访问被回复的消息 ID: {message.reference.message_id}")
             except Exception as e:
-                log.error(f"处理被回复消息时出错: {e}")
+                log.error(f"处理被回复消息时出错: {e}", exc_info=True)
 
-        # 3. 从原始消息文本中提取表情
         content_with_placeholders, emoji_images = await self._extract_emojis_as_images(message.content)
         image_data_list.extend(emoji_images)
 
-        # 4. 清理文本内容
         clean_content = self._clean_message_content(content_with_placeholders, message.mentions, bot_user)
 
-        # 5. 组合最终的文本内容
-        # 组合最终文本，当有回复时，使用新的带换行的格式
         if replied_message_content:
             final_content = f"{replied_message_content}{clean_content}"
         else:
@@ -154,25 +209,18 @@ class MessageProcessor:
         """
         清理消息内容，将对自身的@mention替换为名字，并移除其他@mention。
         """
-        # 还原 Discord 为了 Markdown 显示而自动添加的转义
         content = content.replace('\\_', '_')
         
-        # 处理所有@mention
         for user in mentions:
             mention_str_1 = f'<@{user.id}>'
             mention_str_2 = f'<@!{user.id}>'
             if user.id == bot_user.id:
-                # 如果是机器人自己，替换为名字
                 replacement = f'@{bot_user.display_name}'
                 content = content.replace(mention_str_1, replacement).replace(mention_str_2, replacement)
             else:
-                # 否则，移除提及
                 content = content.replace(mention_str_1, '').replace(mention_str_2, '')
 
-        # 使用 regex_service 清理用户输入中的所有指定括号
         content = regex_service.clean_user_input(content)
-        
-        # 移除多余空格和换行
         content = content.strip()
         
         return content

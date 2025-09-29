@@ -1,7 +1,7 @@
-import aiosqlite
 from datetime import datetime, timedelta, timezone
 from src.chat.utils.database import chat_db_manager
 from src.chat.utils.time_utils import get_start_of_today_utc
+from src.chat.config.chat_config import FEEDING_CONFIG
 
 class FeedingService:
     def __init__(self):
@@ -18,7 +18,7 @@ class FeedingService:
             commit=True
         )
 
-    async def can_feed(self, user_id: str) -> (bool, str):
+    async def can_feed(self, user_id: str) -> tuple[bool, str]:
         """
         检查用户是否可以投喂。
         返回一个元组 (can_feed: bool, message: str)
@@ -34,8 +34,9 @@ class FeedingService:
             # fromisoformat 产生的是 naive datetime，但我们知道它代表 UTC
             last_feeding_time = datetime.fromisoformat(last_feeding_row[0]).replace(tzinfo=timezone.utc)
             time_since_last_feeding = now_utc - last_feeding_time
-            if time_since_last_feeding < timedelta(hours=3):
-                remaining_time = timedelta(hours=3) - time_since_last_feeding
+            cooldown_duration = timedelta(seconds=FEEDING_CONFIG["COOLDOWN_SECONDS"])
+            if time_since_last_feeding < cooldown_duration:
+                remaining_time = cooldown_duration - time_since_last_feeding
                 hours, remainder = divmod(remaining_time.seconds, 3600)
                 minutes, _ = divmod(remainder, 60)
                 

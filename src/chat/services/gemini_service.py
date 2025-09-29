@@ -312,6 +312,11 @@ class GeminiService:
                             last_exception = e
                             log.error(f"An unexpected error occurred with key ...{key_obj.key[-4:]}: {e}", exc_info=True)
                             await self.key_rotation_service.release_key(key_obj.key, success=True) # 释放但不惩罚
+                            # 关键修复：根据函数类型返回不同的错误信号
+                            # 对于 embedding，返回 None 是安全的，调用方会处理
+                            if func.__name__ == 'generate_embedding':
+                                return None
+                            # 对于其他函数，特别是面向用户的聊天，返回一个可读的错误消息
                             return "抱歉，AI服务遇到了一个内部错误，请稍后再试。"
 
                     # 5. 内层循环结束后，根据标志位处理当前密钥

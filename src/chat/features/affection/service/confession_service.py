@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from src.chat.utils.database import chat_db_manager
 from src.chat.utils.time_utils import get_start_of_today_utc
+from src.chat.config.chat_config import CONFESSION_CONFIG
 
 class ConfessionService:
     def __init__(self):
@@ -16,7 +17,7 @@ class ConfessionService:
             commit=True
         )
 
-    async def can_confess(self, user_id: str) -> (bool, str):
+    async def can_confess(self, user_id: str) -> tuple[bool, str]:
         """
         检查用户是否可以忏悔。
         返回一个元组 (can_confess: bool, message: str)
@@ -31,8 +32,9 @@ class ConfessionService:
         if last_confession_row:
             last_confession_time = datetime.fromisoformat(last_confession_row[0]).replace(tzinfo=timezone.utc)
             time_since_last = now_utc - last_confession_time
-            if time_since_last < timedelta(hours=3):
-                remaining_time = timedelta(hours=3) - time_since_last
+            cooldown_duration = timedelta(seconds=CONFESSION_CONFIG["COOLDOWN_SECONDS"])
+            if time_since_last < cooldown_duration:
+                remaining_time = cooldown_duration - time_since_last
                 hours, remainder = divmod(remaining_time.seconds, 3600)
                 minutes, _ = divmod(remainder, 60)
                 

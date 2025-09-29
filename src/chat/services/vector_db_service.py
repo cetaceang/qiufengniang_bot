@@ -4,7 +4,6 @@ import logging
 from typing import List, Dict, Any
 
 import chromadb
-from chromadb.types import Collection
 
 from src.chat.config import chat_config as config
 
@@ -137,6 +136,11 @@ class VectorDBService:
         """
         if not self.is_available():
             log.error("VectorDB 服务不可用，无法执行搜索。")
+            return []
+        
+        # 关键修复：检查传入的 embedding 是否有效
+        if not query_embedding:
+            log.warning("接收到无效的 query_embedding (None)，搜索将返回空结果。")
             return []
 
         try:
