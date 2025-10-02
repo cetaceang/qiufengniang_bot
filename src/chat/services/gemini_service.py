@@ -11,18 +11,15 @@ from datetime import datetime, timezone, timedelta
 import re
 import random
 
-import requests
 from PIL import Image
 import io
 
 # 导入新库
 from google import genai
 from google.genai import types
-from google.api_core import exceptions as google_exceptions
 from google.genai import errors as genai_errors
 
 # 导入数据库管理器和提示词配置
-from src import config
 from src.chat.utils.database import chat_db_manager
 from src.chat.config import chat_config as app_config
 from src.chat.config.emoji_config import EMOJI_MAPPINGS
@@ -280,13 +277,21 @@ class GeminiService:
                             await self.key_rotation_service.release_key(key_obj.key, success=True)
                             return result
 
-                        except genai_errors.ClientError as e:
+                        except (genai_errors.ClientError, genai_errors.ServerError) as e:
                             last_exception = e
                             error_str = str(e)
                             match = re.match(r"(\d{3})", error_str)
                             status_code = int(match.group(1)) if match else None
 
-                            if status_code in [429, 503]: # 可重试的错误
+                            # 检查是否为可重试的错误 (429 Too Many Requests, 503 Service Unavailable)
+                            is_retryable = status_code in [429, 503]
+                            
+                            # ServerError 的 status_code 可能无法通过正则解析，因此额外检查
+                            if not is_retryable and isinstance(e, genai_errors.ServerError) and "503" in error_str:
+                                is_retryable = True
+                                status_code = 503 # 强制设置状态码以便日志记录
+
+                            if is_retryable:
                                 log.warning(f"Key ...{key_obj.key[-4:]} encountered a retryable error (Status: {status_code}).")
                                 if attempt < max_attempts - 1:
                                     delay = app_config.API_RETRY_CONFIG["RETRY_DELAY_SECONDS"]
@@ -303,10 +308,15 @@ class GeminiService:
                                 key_is_invalid = True
                                 break # 中断内层循环，去外层获取新密钥
 
-                            else: # 其他致命的客户端错误
-                                log.error(f"An unexpected but fatal ClientError occurred with key ...{key_obj.key[-4:]} (Status: {status_code}): {e}", exc_info=True)
-                                await self.key_rotation_service.release_key(key_obj.key, success=True) # 释放但不惩罚
-                                return "抱歉，AI服务遇到了一个意料之外的错误，请稍后再试。"
+                            else: # 其他致命的客户端或服务器错误
+                                log.error(f"An unexpected but fatal API error occurred with key ...{key_obj.key[-4:]} (Status: {status_code}): {e}", exc_info=True)
+                                # 对于未知的服务器错误，最好将密钥置于冷却状态
+                                if isinstance(e, genai_errors.ServerError):
+                                    key_should_be_cooled_down = True
+                                    break # 中断内层循环，尝试获取新密钥
+                                else:
+                                    await self.key_rotation_service.release_key(key_obj.key, success=True) # 释放但不惩罚
+                                    return "抱歉，AI服务遇到了一个意料之外的错误，请稍后再试。"
                         
                         except Exception as e:
                             last_exception = e
@@ -317,7 +327,7 @@ class GeminiService:
                             if func.__name__ == 'generate_embedding':
                                 return None
                             # 对于其他函数，特别是面向用户的聊天，返回一个可读的错误消息
-                            return "抱歉，AI服务遇到了一个内部错误，请稍后再试。"
+                            return "呜哇，有点晕嘞，等我休息一会儿 <伤心>"
 
                     # 5. 内层循环结束后，根据标志位处理当前密钥
                     if key_is_invalid:
@@ -331,7 +341,7 @@ class GeminiService:
                     # 这种情况理论上不应该发生，因为 acquire_key 会一直等待。
                     # 但作为保险，我们处理一下。
                     log.error("All API keys are currently unavailable and acquire_key failed to wait. This is unexpected.")
-                    return "抱歉，我们的AI服务暂时过载，请稍后再试。"
+                    return "啊啊啊服务器要爆炸啦！现在有点忙不过来，你过一会儿再来找我玩吧！<生气>"
 
         return wrapper
 
@@ -658,6 +668,27 @@ class GeminiService:
         """
         if not client:
             raise ValueError("Decorator failed to provide a client.")
+
+        # --- 新增：处理 GIF 图片 ---
+        if mime_type == 'image/gif':
+            try:
+                log.info("检测到 GIF 图片，尝试提取第一帧...")
+                with Image.open(io.BytesIO(image_bytes)) as img:
+                    # 寻求第一帧并转换为 RGBA 以确保兼容性
+                    img.seek(0)
+                    # 创建一个新的 BytesIO 对象来保存转换后的图片
+                    output_buffer = io.BytesIO()
+                    # 将图片保存为 PNG 格式
+                    img.save(output_buffer, format='PNG')
+                    # 获取转换后的字节数据
+                    image_bytes = output_buffer.getvalue()
+                    # 更新 MIME 类型
+                    mime_type = 'image/png'
+                    log.info("成功将 GIF 第一帧转换为 PNG。")
+            except Exception as e:
+                log.error(f"处理 GIF 图片时出错: {e}", exc_info=True)
+                return "呜哇，我的眼睛跟不上啦！有点看花眼了"
+        # --- GIF 处理结束 ---
 
         loop = asyncio.get_event_loop()
         request_contents = [
