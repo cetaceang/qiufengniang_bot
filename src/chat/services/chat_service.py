@@ -6,7 +6,6 @@ from typing import Dict, Any
 
 # 导入所需的服务
 from src.chat.services.gemini_service import gemini_service
-from src.chat.services.context_service import context_service
 from src.chat.services.context_service_test import context_service_test # 导入测试服务
 from src.chat.features.world_book.services.world_book_service import world_book_service
 from src.chat.features.affection.service.affection_service import affection_service
@@ -118,7 +117,8 @@ class ChatService:
          
         # 移除了对未开启个人记忆的私聊消息的特殊处理
 
-        final_content = processed_data["final_content"]
+        user_content = processed_data["user_content"]
+        replied_content = processed_data["replied_content"]
         image_data_list = processed_data["image_data_list"]
 
         try:
@@ -131,12 +131,16 @@ class ChatService:
 
             # RAG: 从世界书检索相关条目
             world_book_entries = await world_book_service.find_entries(
-                latest_query=final_content,
+                latest_query=user_content, # 使用用户的实际输入进行搜索
                 user_id=author.id,
                 guild_id=guild_id,
                 user_name=author.display_name,
                 conversation_history=channel_context
             )
+
+            # --- 新增：集中获取所有上下文数据 ---
+            affection_status = await affection_service.get_affection_status(author.id, guild_id)
+            user_profile_data = world_book_service.get_profile_by_discord_id(str(author.id))
 
             # 3. --- 好感度与奖励更新（前置） ---
             try:
@@ -161,12 +165,15 @@ class ChatService:
             ai_response = await gemini_service.generate_response(
                 author.id,
                 guild_id,
-                message=final_content,
+                message=user_content,
+                replied_message=replied_content,
                 images=image_data_list if image_data_list else None,
                 user_name=author.display_name,
                 channel_context=channel_context,
                 world_book_entries=world_book_entries,
-                personal_summary=personal_summary
+                personal_summary=personal_summary,
+                affection_status=affection_status,
+                user_profile_data=user_profile_data
             )
 
             if not ai_response:

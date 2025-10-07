@@ -10,10 +10,12 @@ import os
 from src import config
 from src.chat.services.gemini_service import gemini_service
 from src.chat.config.thread_prompts import THREAD_PRAISE_PROMPT
+from src.chat.services.prompt_service import JAILBREAK_USER_PROMPT, JAILBREAK_MODEL_RESPONSE, JAILBREAK_FINAL_INSTRUCTION
+from datetime import datetime, timezone, timedelta
 from src.chat.utils.prompt_utils import replace_emojis, get_thread_commentor_persona
 from src.chat.utils.database import chat_db_manager
 from src.chat.features.odysseia_coin.service.coin_service import coin_service
-from src.chat.config.chat_config import DEBUG_CONFIG
+from src.chat.features.world_book.services.world_book_service import world_book_service
 
 log = logging.getLogger(__name__)
 
@@ -104,22 +106,73 @@ class ThreadCommentorService:
             # 3. 获取用户记忆
             user_memory = await self._get_user_memory(user_id)
 
-            # 4. 准备调用所需的所有信息片段
+            # 4. 新增：调用 RAG 服务进行世界书搜索
+            rag_context = ""
+            try:
+                log.info(f"开始为帖子 '{title}' 的内容进行 RAG 搜索...")
+                rag_results = await world_book_service.find_entries(
+                    latest_query=thread_full_content,
+                    user_id=user_id,
+                    guild_id=thread.guild.id,
+                    user_name=user_nickname,
+                    n_results=3, # 最多获取3个相关条目
+                    max_distance=0.7
+                )
+                if rag_results:
+                    rag_context_parts = ["为了帮助你更好地理解帖子中可能提到的社区术语，这里有一些相关的背景知识："]
+                    for result in rag_results:
+                        entry_title = result.get('metadata', {}).get('title', '未知标题')
+                        entry_content = result.get('document', '无内容')
+                        rag_context_parts.append(f"- **{entry_title}**: {entry_content}")
+                    
+                    rag_context = "\n".join(rag_context_parts)
+                    log.info(f"RAG 搜索成功，为帖子 '{title}' 找到了 {len(rag_results)} 个相关条目。")
+                else:
+                    log.info(f"RAG 搜索没有为帖子 '{title}' 找到相关条目。")
+            except Exception as e:
+                log.error(f"为帖子 '{title}' 进行 RAG 搜索时发生错误: {e}", exc_info=True)
+
+            # 5. 准备调用所需的所有信息片段
             core_persona = get_thread_commentor_persona()
+            task_prompt = THREAD_PRAISE_PROMPT.format(user_nickname=user_nickname)
+
+            log.info(f"为帖子 '{title}' 构建带有破限功能的统一上下文，即将调用AI服务。")
+
+            # 6. 手动构建带有“破限”逻辑的对话历史
+            conversation_history = [
+                {"role": "user", "parts": [JAILBREAK_USER_PROMPT]},
+                {"role": "model", "parts": [JAILBREAK_MODEL_RESPONSE]},
+                {"role": "user", "parts": [core_persona]},
+                {"role": "model", "parts": ["好的，我是类脑娘，已经准备好了"]},
+                {"role": "user", "parts": [user_memory]},
+                {"role": "model", "parts": ["关于你的事情，我当然都记得"]},
+            ]
             
-            task_prompt = THREAD_PRAISE_PROMPT.format(
-                user_nickname=user_nickname,
-                user_memory=user_memory
-            )
+            # 如果有 RAG 结果，则注入
+            if rag_context:
+                conversation_history.append({"role": "user", "parts": [rag_context]})
+                conversation_history.append({"role": "model", "parts": ["哦哦，原来是这样！我明白了！"]})
 
-            log.info(f"为帖子 '{title}' 准备好所有上下文信息，即将调用AI服务。")
+            conversation_history.extend([
+                {"role": "user", "parts": [task_prompt]},
+                {"role": "model", "parts": ["好的，我记下了。"]}
+            ])
+            
+            # 注入最终指令到最后一条 model 消息
+            beijing_tz = timezone(timedelta(hours=8))
+            current_beijing_time = datetime.now(beijing_tz).strftime('%Y年%m月%d日 %H:%M')
+            final_injection_content = JAILBREAK_FINAL_INSTRUCTION.format(current_time=current_beijing_time)
+            
+            last_model_message = conversation_history[-1]
+            if last_model_message["role"] == "model" and last_model_message["parts"]:
+                last_model_message["parts"][0] += f" {final_injection_content}"
 
-            # 5. 调用重构后的 Gemini 服务方法
+            # 添加最终的用户输入（帖子内容）
+            conversation_history.append({"role": "user", "parts": [thread_full_content]})
+
+            # 7. 调用重构后的 Gemini 服务方法
             praise_text = await gemini_service.generate_thread_praise(
-                core_persona=core_persona,
-                user_memory=user_memory,
-                task_prompt=task_prompt,
-                thread_content=thread_full_content
+                conversation_history=conversation_history
             )
 
             if praise_text:

@@ -248,7 +248,6 @@ class GeminiService:
         async def wrapper(self: 'GeminiService', *args, **kwargs):
             # --- 新逻辑：将冷却检查移入装饰器，并使其仅对特定函数生效 ---
             
-            is_chat_request = func.__name__ == 'generate_response'
 
             last_exception = None
             
@@ -271,9 +270,38 @@ class GeminiService:
                             
                             # 4. 执行原始的API调用函数
                             result = await func(self, *args, client=client, **kwargs)
+
+                            # --- 新增：处理特殊的“空回复”并进行同密钥重试 ---
+                            is_special_empty_response = False
+                            if isinstance(result, types.GenerateContentResponse):
+                                if not result.parts and result.prompt_feedback and result.prompt_feedback.block_reason:
+                                    is_special_empty_response = True
+
+                            if is_special_empty_response:
+                                log.warning(f"Key ...{key_obj.key[-4:]} received a special empty response (reason: {result.prompt_feedback.block_reason}). Initiating same-key retries.")
+                                
+                                empty_response_max_attempts = app_config.API_RETRY_CONFIG.get("EMPTY_RESPONSE_MAX_ATTEMPTS", 2)
+                                for empty_attempt in range(empty_response_max_attempts):
+                                    delay = app_config.API_RETRY_CONFIG["RETRY_DELAY_SECONDS"]
+                                    log.info(f"Waiting for {delay}s before same-key retry {empty_attempt + 1}/{empty_response_max_attempts}.")
+                                    await asyncio.sleep(delay)
+                                    
+                                    # 使用同一个 client (和 key) 再次尝试
+                                    result = await func(self, *args, client=client, **kwargs)
+                                    
+                                    # 检查重试结果
+                                    if isinstance(result, types.GenerateContentResponse) and result.parts:
+                                        log.info(f"Same-key retry successful for key ...{key_obj.key[-4:]}.")
+                                        # 如果重试成功，则走正常的成功路径
+                                        await self.key_rotation_service.release_key(key_obj.key, success=True)
+                                        return result
+                                
+                                # 如果所有“特殊空回复”的重试都失败了
+                                log.warning(f"All {empty_response_max_attempts} same-key retries failed for key ...{key_obj.key[-4:]}. It will be put in cooldown.")
+                                key_should_be_cooled_down = True
+                                break # 中断主重试循环 (for attempt in range(max_attempts))，去换下一个密钥
                             
-                            # 5. 如果成功，记账、释放密钥并立即返回结果
-                            
+                            # 5. 如果不是特殊空回复且成功，记账、释放密钥并立即返回结果
                             await self.key_rotation_service.release_key(key_obj.key, success=True)
                             return result
 
@@ -319,7 +347,6 @@ class GeminiService:
                                     return "抱歉，AI服务遇到了一个意料之外的错误，请稍后再试。"
                         
                         except Exception as e:
-                            last_exception = e
                             log.error(f"An unexpected error occurred with key ...{key_obj.key[-4:]}: {e}", exc_info=True)
                             await self.key_rotation_service.release_key(key_obj.key, success=True) # 释放但不惩罚
                             # 关键修复：根据函数类型返回不同的错误信号
@@ -347,10 +374,14 @@ class GeminiService:
 
     @_api_key_handler
     async def generate_response(self, user_id: int, guild_id: int, message: str,
+                                  replied_message: Optional[str] = None,
                                   images: Optional[List[Dict]] = None, user_name: str = "用户",
                                   channel_context: Optional[List[Dict]] = None,
                                   world_book_entries: Optional[List[Dict]] = None,
-                                  personal_summary: Optional[str] = None, client: Any = None) -> str:
+                                  personal_summary: Optional[str] = None,
+                                  affection_status: Optional[Dict[str, Any]] = None,
+                                  user_profile_data: Optional[Dict[str, Any]] = None,
+                                  client: Any = None) -> str:
         """生成AI回复（已重构）。"""
         # --- 新逻辑：冷却检查已移至装饰器，此处不再需要 ---
         # 装饰器会处理密钥和客户端的创建，这里我们直接使用
@@ -360,11 +391,11 @@ class GeminiService:
 
         # 移除外层 try...except，让异常传递给装饰器
         # 1. 构建完整的对话提示
-        affection_status = await affection_service.get_affection_status(user_id, guild_id)
         final_conversation = prompt_service.build_chat_prompt(
-            user_name=user_name, message=message, images=images,
+            user_name=user_name, message=message, replied_message=replied_message, images=images,
             channel_context=channel_context, world_book_entries=world_book_entries,
-            affection_status=affection_status, personal_summary=personal_summary
+            affection_status=affection_status, personal_summary=personal_summary,
+            user_profile_data=user_profile_data
         )
         
         # 3. 准备 API 调用参数
@@ -550,16 +581,14 @@ class GeminiService:
         return None
 
     @_api_key_handler
-    async def generate_thread_praise(self, core_persona: str, user_memory: str, task_prompt: str, thread_content: str, client: Any = None) -> Optional[str]:
+    async def generate_thread_praise(self, conversation_history: List[Dict[str, Any]], client: Any = None) -> Optional[str]:
         """
         专用于生成帖子夸奖的方法。
-        严格按照 user/model 交替确认的格式构建上下文。
+        现在接收一个由 prompt_service 构建好的完整对话历史。
 
         Args:
-            core_persona: 精简后的核心人设。
-            user_memory: 关于用户的记忆。
-            task_prompt: 具体的任务指令。
-            thread_content: 帖子内容。
+            conversation_history: 完整的对话历史列表。
+            client: (由装饰器注入) Gemini 客户端。
 
         Returns:
             生成的夸奖文本，如果失败则返回 None。
@@ -574,16 +603,7 @@ class GeminiService:
         )
         final_model_name = self.model_name
 
-        # 严格按照用户要求的格式构建多轮对话历史
-        final_contents = [
-            types.Content(role="user", parts=[types.Part(text=core_persona)]),
-            types.Content(role="model", parts=[types.Part(text="知道了")]),
-            types.Content(role="user", parts=[types.Part(text=user_memory)]),
-            types.Content(role="model", parts=[types.Part(text="知道了")]),
-            types.Content(role="user", parts=[types.Part(text=task_prompt)]),
-            types.Content(role="model", parts=[types.Part(text="知道了")]),
-            types.Content(role="user", parts=[types.Part(text=thread_content)]),
-        ]
+        final_contents = self._prepare_api_contents(conversation_history)
         
         # 如果开启了 AI 完整上下文日志，则打印到终端
         if app_config.DEBUG_CONFIG["LOG_AI_FULL_CONTEXT"]:

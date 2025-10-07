@@ -78,6 +78,7 @@ BLACKLIST_BAN_DURATION_MINUTES = (3, 8)
 API_RETRY_CONFIG = {
     "MAX_ATTEMPTS_PER_KEY": 3,  # 单个密钥在因可重试错误而被轮换前，允许的最大尝试次数
     "RETRY_DELAY_SECONDS": 1,   # 对同一个密钥进行重试前的延迟（秒）
+    "EMPTY_RESPONSE_MAX_ATTEMPTS": 2, # 当API返回空回复（可能因安全设置）时，使用同一个密钥进行重试的最大次数
 }
 
 

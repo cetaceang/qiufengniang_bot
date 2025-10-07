@@ -5,12 +5,9 @@ from typing import Optional, Dict, List, Any
 import discord
 from discord.ext import commands
 import re
-from src import config
 from src.chat.config import chat_config
 from src.chat.utils.database import chat_db_manager
 from src.chat.services.regex_service import regex_service
-from src.chat.features.affection.service.affection_service import affection_service
-from src.chat.features.world_book.services.world_book_service import world_book_service
 
 log = logging.getLogger(__name__)
 
@@ -105,27 +102,10 @@ class ContextServiceTest:
                     "parts": [background_prompt]
                 })
 
-            # 2. 注入好感度和用户档案作为 model 的确认和上下文提示
-            affection_status = await affection_service.get_affection_status(user_id, guild_id)
-            affection_level_prompt = affection_status.get("prompt", "")
-            
-            user_profile_prompt = ""
-            log.debug(f"--- 个人档案注入诊断 (Test Service): 正在为用户 {user_id} 查找档案 ---")
-            user_profile = world_book_service.get_profile_by_discord_id(str(user_id))
-            log.debug(f"--- 个人档案注入诊断 (Test Service): world_book_service 返回的档案: {user_profile} ---")
-            if user_profile:
-                profile_content = user_profile.get('content', {})
-                if isinstance(profile_content, dict):
-                    profile_details = [f"{key}: {value}" for key, value in profile_content.items() if value and value != '未提供']
-                    log.debug(f"--- 个人档案注入诊断 (Test Service): 过滤后的档案详情: {profile_details} ---")
-                    if profile_details:
-                        user_profile_prompt = "\n\n这是与我对话的用户的已知信息：\n" + "\n".join(profile_details)
-            
-            log.debug(f"--- 个人档案注入诊断 (Test Service): 最终生成的档案提示长度: {len(user_profile_prompt)} ---")
-            model_reply = f"好的，我已了解历史对话的背景。{affection_level_prompt}{user_profile_prompt}"
+            # 2. 添加一个确认收到历史背景的 model 回复，以维持对话轮次
             final_context.append({
                 "role": "model",
-                "parts": [model_reply]
+                "parts": ["好的，我已了解频道的历史对话"]
             })
             
             return final_context

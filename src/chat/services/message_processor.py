@@ -179,13 +179,9 @@ class MessageProcessor:
 
         clean_content = self._clean_message_content(content_with_placeholders, message.mentions, bot_user)
 
-        if replied_message_content:
-            final_content = f"{replied_message_content}{clean_content}"
-        else:
-            final_content = clean_content
-
         return {
-            "final_content": final_content,
+            "user_content": clean_content,
+            "replied_content": replied_message_content,
             "image_data_list": image_data_list
         }
 
