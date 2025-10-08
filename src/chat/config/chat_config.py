@@ -28,7 +28,7 @@ GEMINI_CHAT_CONFIG = {
     "top_p": 0.97,
     "top_k": 50,
     "max_output_tokens": 3000,
-    "thinking_budget": 500,  # 思考预算
+    "thinking_budget": 1500, # 思考预算 (增加预算以提升人设一致性)
 }
 
 GEMINI_TEXT_GEN_CONFIG = {
