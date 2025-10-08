@@ -78,12 +78,12 @@ class PromptService:
 
         # 注入个人记忆
         if personal_summary:
-            personal_summary_content = f"这是关于我 {user_name} 的一些个人记忆，请在对话中参考：\n<personal_memory>\n{personal_summary}\n</personal_memory>"
+            personal_summary_content = f"这是关于 {user_name} 的一些个人记忆，请在对话中参考：\n<personal_memory>\n{personal_summary}\n</personal_memory>"
             final_conversation.append({"role": "user", "parts": [personal_summary_content]})
             final_conversation.append({"role": "model", "parts": ["关于你的事情，我当然都记得"]})
 
         # --- 新增：注入好感度和用户档案 ---
-        affection_prompt = affection_status.get("prompt", "") if affection_status else ""
+        affection_prompt = affection_status.get("prompt", "").replace("用户", user_name) if affection_status else ""
         
         user_profile_prompt = ""
         if user_profile_data:
@@ -91,11 +91,13 @@ class PromptService:
             if isinstance(profile_content, dict):
                 profile_details = [f"{key}: {value}" for key, value in profile_content.items() if value and value != '未提供']
                 if profile_details:
-                    user_profile_prompt = "\n\n这是与我对话的用户的已知信息：\n" + "\n".join(profile_details)
+                    # 移除内部重复的标题，信息将在外部标题下统一呈现
+                    user_profile_prompt = "\n\n" + "\n".join(profile_details)
 
         if affection_prompt or user_profile_prompt:
             combined_prompt = f"{affection_prompt}{user_profile_prompt}".strip()
-            final_conversation.append({"role": "user", "parts": [f"这是关于我 {user_name} 的一些背景信息：\n{combined_prompt}"]})
+            # 更新外部标题，使其更具包容性
+            final_conversation.append({"role": "user", "parts": [f"这是关于 {user_name} 的一些背景信息和已知信息：\n{combined_prompt}"]})
             final_conversation.append({"role": "model", "parts": ["好的，我记下了。"]})
 
 
@@ -293,12 +295,8 @@ class PromptService:
             formatted_entries.append(f"{header}{meta_str}{final_content}")
 
         if formatted_entries:
-            # 使用第一个有效条目的ID作为主题，如果找不到则使用通用名称
-            main_subject = "相关信息"
-            if entries and entries[0].get('id'):
-                main_subject = entries[0].get('id')
-
-            header = f"这是关于 '{main_subject}' 的一些记忆，可能与当前对话相关，也可能不相关。请你酌情参考：\n"
+            # 使用通用标题，不再显示具体的搜索词或ID
+            header = "这是一些相关的记忆，可能与当前对话相关，也可能不相关。请你酌情参考：\n"
             body = "".join(formatted_entries)
             return f"{header}<world_book_context>{body}\n\n</world_book_context>"
 
