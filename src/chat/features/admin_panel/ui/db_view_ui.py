@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 import discord
-from discord.ext import commands
 import logging
 import sqlite3
 import os
@@ -399,6 +398,18 @@ class DBView(discord.ui.View):
         # 3. 回退机制：以防未来有其他表
         return f"ID: {entry['id']}"
 
+    def _truncate_field_value(self, value: any) -> str:
+        """将值截断以符合 Discord embed 字段值的长度限制。"""
+        value_str = str(value)
+        if len(value_str) > 1024:
+            # 检查是否是代码块
+            if value_str.startswith("```") and value_str.endswith("```"):
+                # 为 "...\n```" 留出空间
+                return value_str[:1017] + "...\n```"
+            else:
+                return value_str[:1021] + "..."
+        return value_str
+
     async def edit_item(self, interaction: discord.Interaction):
         if not self.current_item_id:
             return await interaction.response.send_message("没有可编辑的条目。", ephemeral=True)
@@ -547,7 +558,7 @@ class DBView(discord.ui.View):
                 if value is None or str(value).strip() == '':
                     value = "_(空)_"
 
-                embed.add_field(name=col.replace('_', ' ').title(), value=value, inline=False)
+                embed.add_field(name=col.replace('_', ' ').title(), value=self._truncate_field_value(value), inline=False)
             return embed
         except Exception as e:
             log.error(f"获取条目详情时出错: {e}", exc_info=True)
