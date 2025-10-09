@@ -109,7 +109,7 @@ class PromptService:
         # --- 4. 回复上下文注入 (后置) ---
         if replied_message:
             # replied_message 已经包含了 "> [回复 xxx]:" 的头部和 markdown 引用格式
-            reply_injection_prompt = f"这是你正在回复的消息：\n{replied_message}"
+            reply_injection_prompt = f"这是用户 {user_name} 正在回复的消息：\n{replied_message}"
             final_conversation.append({"role": "user", "parts": [reply_injection_prompt]})
             final_conversation.append({"role": "model", "parts": ["好的，我知道了。"]})
             log.debug("已在频道历史后注入回复消息上下文。")
