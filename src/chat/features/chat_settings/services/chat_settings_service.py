@@ -1,5 +1,5 @@
 import discord
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta, timezone
 from src.chat.utils.database import chat_db_manager
 
@@ -29,6 +29,7 @@ class ChatSettingsService:
         """获取一个服务器的完整聊天设置，包括全局和所有特定频道的配置。"""
         global_config_row = await self.db_manager.get_global_chat_config(guild_id)
         channel_configs_rows = await self.db_manager.get_all_channel_configs_for_guild(guild_id)
+        warm_up_channels = await self.db_manager.get_warm_up_channels(guild_id)
 
         settings = {
             "global": {
@@ -43,7 +44,8 @@ class ChatSettingsService:
                     "cooldown_duration": config['cooldown_duration'],
                     "cooldown_limit": config['cooldown_limit'],
                 } for config in channel_configs_rows
-            }
+            },
+            "warm_up_channels": warm_up_channels
         }
         return settings
 
@@ -167,6 +169,22 @@ class ChatSettingsService:
         
         # 总是更新固定CD的时间戳，以备模式切换或用于其他目的
         await self.db_manager.update_user_cooldown(user_id, channel_id)
+
+    async def get_warm_up_channels(self, guild_id: int) -> List[int]:
+        """获取服务器的所有暖贴频道ID。"""
+        return await self.db_manager.get_warm_up_channels(guild_id)
+
+    async def add_warm_up_channel(self, guild_id: int, channel_id: int):
+        """添加一个暖贴频道。"""
+        await self.db_manager.add_warm_up_channel(guild_id, channel_id)
+
+    async def remove_warm_up_channel(self, guild_id: int, channel_id: int):
+        """移除一个暖贴频道。"""
+        await self.db_manager.remove_warm_up_channel(guild_id, channel_id)
+
+    async def is_warm_up_channel(self, guild_id: int, channel_id: int) -> bool:
+        """检查一个频道是否是暖贴频道。"""
+        return await self.db_manager.is_warm_up_channel(guild_id, channel_id)
 
 # 单例实例
 chat_settings_service = ChatSettingsService()

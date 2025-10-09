@@ -254,6 +254,15 @@ class ChatDatabaseManager:
                 );
             """)
 
+            # --- 暖贴功能频道设置 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS warm_up_channels (
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    PRIMARY KEY (guild_id, channel_id)
+                );
+            """)
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS channel_chat_config (
                     config_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -711,6 +720,31 @@ class ChatDatabaseManager:
         )
         await self._execute(self._db_transaction, query, params, commit=True)
         log.info(f"已更新用户 {user_id} 的个人帖子冷却设置: {settings}")
+
+    # --- 暖贴频道管理 ---
+    async def get_warm_up_channels(self, guild_id: int) -> List[int]:
+        """获取服务器的所有暖贴频道ID。"""
+        query = "SELECT channel_id FROM warm_up_channels WHERE guild_id = ?"
+        rows = await self._execute(self._db_transaction, query, (guild_id,), fetch="all")
+        return [row['channel_id'] for row in rows]
+
+    async def add_warm_up_channel(self, guild_id: int, channel_id: int) -> None:
+        """添加一个暖贴频道。"""
+        query = "INSERT OR IGNORE INTO warm_up_channels (guild_id, channel_id) VALUES (?, ?)"
+        await self._execute(self._db_transaction, query, (guild_id, channel_id), commit=True)
+        log.info(f"已为服务器 {guild_id} 添加暖贴频道 {channel_id}。")
+
+    async def remove_warm_up_channel(self, guild_id: int, channel_id: int) -> None:
+        """移除一个暖贴频道。"""
+        query = "DELETE FROM warm_up_channels WHERE guild_id = ? AND channel_id = ?"
+        await self._execute(self._db_transaction, query, (guild_id, channel_id), commit=True)
+        log.info(f"已为服务器 {guild_id} 移除暖贴频道 {channel_id}。")
+
+    async def is_warm_up_channel(self, guild_id: int, channel_id: int) -> bool:
+        """检查一个频道是否是暖贴频道。"""
+        query = "SELECT 1 FROM warm_up_channels WHERE guild_id = ? AND channel_id = ?"
+        row = await self._execute(self._db_transaction, query, (guild_id, channel_id), fetch="one")
+        return row is not None
 
 # --- 单例实例 ---
 chat_db_manager = ChatDatabaseManager()

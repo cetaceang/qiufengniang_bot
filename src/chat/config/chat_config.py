@@ -255,10 +255,6 @@ CONFESSION_PROMPT = """
 """
 
 # --- 帖子评价功能 ---
-# 功能总开关
-THREAD_COMMENTOR_ENABLED = os.getenv("THREAD_COMMENTOR_ENABLED", "False").lower() == "true"
-# 指定需要评价的论坛频道ID列表
-TARGET_FORUM_CHANNELS = _parse_ids("TARGET_FORUM_CHANNELS")
 
 # --- 调试配置 ---
 DEBUG_CONFIG = {

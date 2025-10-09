@@ -5,8 +5,8 @@ import discord
 from discord.ext import commands
 import asyncio
 
-from src.chat.config import chat_config as app_config
 from src.chat.features.thread_commentor.services.thread_commentor_service import thread_commentor_service
+from src.chat.features.chat_settings.services.chat_settings_service import chat_settings_service
 
 log = logging.getLogger(__name__)
 
@@ -21,12 +21,12 @@ class ThreadCommentorCog(commands.Cog):
         """
         当有新帖子被创建时触发。
         """
-        # 1. 检查功能是否开启
-        if not app_config.THREAD_COMMENTOR_ENABLED:
+        # 1. 检查暖贴功能是否全局开启
+        if not await chat_settings_service.is_warm_up_enabled(thread.guild.id):
             return
 
-        # 2. 检查是否为指定的目标论坛频道
-        if thread.parent_id not in app_config.TARGET_FORUM_CHANNELS:
+        # 2. 检查该频道是否在暖贴频道列表中
+        if not await chat_settings_service.is_warm_up_channel(thread.guild.id, thread.parent_id):
             return
         
         # 3. 检查发帖人是否为机器人本身，避免自我循环
