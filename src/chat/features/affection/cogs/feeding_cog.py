@@ -102,7 +102,7 @@ class FeedingCog(commands.Cog):
             )
             
             # 设置作者信息
-            embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.avatar.url)
+            embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
 
             # 从配置中获取图片 URL
             image_url = FEEDING_CONFIG.get("RESPONSE_IMAGE_URL")
