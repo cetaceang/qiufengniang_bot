@@ -1,7 +1,6 @@
 import os
 import asyncio
 import logging
-import threading
 import queue
 import sys
 import discord
@@ -10,6 +9,18 @@ import requests
 from discord.ext import commands
 from dotenv import load_dotenv
 from datetime import datetime, timezone
+
+# 在所有其他导入之前，尽早加载环境变量
+# 这样可以确保所有模块在加载时都能访问到 .env 文件中定义的配置
+load_dotenv()
+
+# 从我们自己的模块中导入
+from src import config
+from src.guidance.utils.database import guidance_db_manager
+from src.chat.utils.database import chat_db_manager
+from src.chat.features.world_book.database.world_book_db_manager import world_book_db_manager
+# 导入全局 gemini_service 实例
+from src.chat.services.gemini_service import gemini_service
 
 current_script_path = os.path.abspath(__file__)
 current_dir = os.path.dirname(current_script_path)
@@ -52,15 +63,7 @@ def heartbeat_sender():
             print(f"Heartbeat Error: Could not connet to {log_server_url}.\nDetail:{e}",file=sys.stderr)
 # --- WebUI_end ---
 
-# 在所有其他导入之前，尽早加载环境变量
-# 这样可以确保所有模块在加载时都能访问到 .env 文件中定义的配置
-load_dotenv()
 
-# 从我们自己的模块中导入
-from src import config
-from src.guidance.utils.database import guidance_db_manager
-from src.chat.utils.database import chat_db_manager
-from src.chat.features.world_book.database.world_book_db_manager import world_book_db_manager
 
 if sys.platform != "win32":
     try:
@@ -239,7 +242,7 @@ class GuidanceBot(commands.Bot):
     async def on_ready(self):
         """当机器人成功连接到 Discord 时调用"""
         log = logging.getLogger(__name__)
-        log.info(f'--- 机器人已上线 ---')
+        log.info('--- 机器人已上线 ---')
         if self.user:
             log.info(f'登录用户: {self.user} (ID: {self.user.id})')
         
@@ -308,13 +311,23 @@ async def main():
     await chat_db_manager.init_async()
 
     # 3.5. 初始化商店商品
-    from src.chat.features.odysseia_coin.service.coin_service import coin_service, _setup_initial_items
+    from src.chat.features.odysseia_coin.service.coin_service import _setup_initial_items
     await _setup_initial_items()
     log.info("已初始化商店商品。")
+
+    # 3.6. 导入并注册所有 AI 工具
+    # 这是一个关键步骤。通过在这里导入工具模块，我们可以确保
+    # @register_tool 装饰器被执行，从而将工具函数及其 Schema
+    # 添加到全局的 tool_registry 中。
+    from src.chat.features.tools.functions import get_user_avatar
+    log.info("已加载并注册 AI 工具。")
 
     # 4. 创建并运行机器人实例
     bot = GuidanceBot()
     guidance_db_manager.set_bot_instance(bot)
+    # 在机器人启动时，将 bot 实例注入到 GeminiService 中
+    # 这是确保工具能够访问 Discord API 的关键步骤
+    gemini_service.set_bot(bot)
     
     token = os.getenv("DISCORD_TOKEN")
     if not token:

@@ -28,7 +28,7 @@ GEMINI_CHAT_CONFIG = {
     "top_p": 0.97,
     "top_k": 50,
     "max_output_tokens": 3000,
-    "thinking_budget": 1500, # 思考预算 (增加预算以提升人设一致性)
+    "thinking_budget": 1500,  # 思考预算 (增加预算以提升人设一致性)
 }
 
 GEMINI_TEXT_GEN_CONFIG = {
@@ -69,7 +69,7 @@ GEMINI_CONFESSION_GEN_CONFIG = {
 
 COOLDOWN_RATES = {
     "default": 2,  # 每分钟请求次数
-    "coffee": 5,   # 每分钟请求次数
+    "coffee": 5,  # 每分钟请求次数
 }
 # (min, max) 分钟
 BLACKLIST_BAN_DURATION_MINUTES = (3, 8)
@@ -77,10 +77,17 @@ BLACKLIST_BAN_DURATION_MINUTES = (3, 8)
 # --- API 密钥重试与轮换配置 ---
 API_RETRY_CONFIG = {
     "MAX_ATTEMPTS_PER_KEY": 1,  # 单个密钥在因可重试错误而被轮换前，允许的最大尝试次数
-    "RETRY_DELAY_SECONDS": 1,   # 对同一个密钥进行重试前的延迟（秒）
-    "EMPTY_RESPONSE_MAX_ATTEMPTS": 2, # 当API返回空回复（可能因安全设置）时，使用同一个密钥进行重试的最大次数
+    "RETRY_DELAY_SECONDS": 1,  # 对同一个密钥进行重试前的延迟（秒）
+    "EMPTY_RESPONSE_MAX_ATTEMPTS": 2,  # 当API返回空回复（可能因安全设置）时，使用同一个密钥进行重试的最大次数
 }
 
+# 定义不同安全风险等级对应的信誉惩罚值
+SAFETY_PENALTY_MAP = {
+    "NEGLIGIBLE": 0,  # 可忽略
+    "LOW": 5,  # 低风险
+    "MEDIUM": 15,  # 中等风险
+    "HIGH": 30,  # 高风险
+}
 
 # --- 类脑币系统 ---
 # 在指定论坛频道发帖可获得奖励
@@ -88,41 +95,41 @@ COIN_REWARD_FORUM_CHANNEL_IDS = _parse_ids("COIN_REWARD_FORUM_CHANNEL_IDS")
 
 # --- 好感度系统 ---
 AFFECTION_CONFIG = {
-    "INCREASE_CHANCE": 0.5,       # 每次对话增加好感度的几率
-    "INCREASE_AMOUNT": 1,         # 每次增加的点数
-    "DAILY_CHAT_AFFECTION_CAP": 20, # 每日通过对话获取的好感度上限
-    "BLACKLIST_PENALTY": -5,    # 被AI拉黑时扣除的点数
-    "DAILY_FLUCTUATION": (-3, 8)  # 每日好感度随机浮动的范围
+    "INCREASE_CHANCE": 0.5,  # 每次对话增加好感度的几率
+    "INCREASE_AMOUNT": 1,  # 每次增加的点数
+    "DAILY_CHAT_AFFECTION_CAP": 20,  # 每日通过对话获取的好感度上限
+    "BLACKLIST_PENALTY": -5,  # 被AI拉黑时扣除的点数
+    "DAILY_FLUCTUATION": (-3, 8),  # 每日好感度随机浮动的范围
 }
 
 # --- 投喂功能 ---
 FEEDING_CONFIG = {
     "COOLDOWN_SECONDS": 10800,  # 5 minutes
-    "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1418576178326802524/3_632830043818943_00001_.png" # 投喂回应的默认图片URL
+    "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1418576178326802524/3_632830043818943_00001_.png",  # 投喂回应的默认图片URL
 }
 
 # --- 忏悔功能 ---
 CONFESSION_CONFIG = {
     "COOLDOWN_SECONDS": 10800,  # 10 minutes
-    "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1419992658067325008/3_1124796593853479_00001_.png" # 忏悔回应的默认图片URL
+    "RESPONSE_IMAGE_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1419992658067325008/3_1124796593853479_00001_.png",  # 忏悔回应的默认图片URL
 }
 
 # --- 类脑币系统 ---
 COIN_CONFIG = {
-    "DAILY_FIRST_CHAT_REWARD": 50, # 每日首次与AI对话获得的类脑币奖励
-    "FORUM_POST_REWARD": 200       # 在指定论坛频道发帖获得的类脑币奖励
+    "DAILY_FIRST_CHAT_REWARD": 50,  # 每日首次与AI对话获得的类脑币奖励
+    "FORUM_POST_REWARD": 200,  # 在指定论坛频道发帖获得的类脑币奖励
 }
 
 # --- 个人记忆功能 ---
 PERSONAL_MEMORY_CONFIG = {
-    "summary_threshold": 20,       # 触发总结的消息数量阈值 (测试用 5, 原为 50)
+    "summary_threshold": 20,  # 触发总结的消息数量阈值 (测试用 5, 原为 50)
 }
 
 
 # --- 频道记忆功能 ---
 CHANNEL_MEMORY_CONFIG = {
-    "raw_history_limit": 10,       # 从Discord API获取的原始消息数量
-    "formatted_history_limit": 10, # 格式化为AI模型可用的对话历史消息数量
+    "raw_history_limit": 10,  # 从Discord API获取的原始消息数量
+    "formatted_history_limit": 10,  # 格式化为AI模型可用的对话历史消息数量
 }
 
 
@@ -171,44 +178,34 @@ VECTOR_DB_COLLECTION_NAME = "world_book"
 # --- 世界之书向量化任务配置 ---
 WORLD_BOOK_CONFIG = {
     "VECTOR_INDEX_UPDATE_INTERVAL_HOURS": 6,  # 向量索引更新间隔（小时）
-
     # 审核系统设置
     "review_settings": {
         # 审核的持续时间（分钟）
         "review_duration_minutes": 5,
-
         # 审核时间结束后，通过所需的最低赞成票数
         "approval_threshold": 5,
-
         # 在审核期间，可立即通过的赞成票数
         "instant_approval_threshold": 10,
-
         # 在审核期间，可立即否决的反对票数
         "rejection_threshold": 3,
-        
         # 投票使用的表情符号
         "vote_emoji": "✅",
         "reject_emoji": "❌",
     },
-    
     # 个人资料审核设置
     "personal_profile_review_settings": {
         # 审核的持续时间（分钟）
         "review_duration_minutes": 5,
-
         # 审核时间结束后，通过所需的最低赞成票数
         "approval_threshold": 2,
-
         # 在审核期间，可立即通过的赞成票数
         "instant_approval_threshold": 7,
-
         # 在审核期间，可立即否决的反对票数
         "rejection_threshold": 3,
-        
         # 投票使用的表情符号
         "vote_emoji": "✅",
         "reject_emoji": "❌",
-    }
+    },
 }
 
 # --- 礼物功能提示词配置 ---
@@ -258,6 +255,7 @@ CONFESSION_PROMPT = """
 
 # --- 调试配置 ---
 DEBUG_CONFIG = {
-    "LOG_FINAL_CONTEXT": False, # 是否在日志中打印发送给AI的最终上下文，用于调试
-    "LOG_AI_FULL_CONTEXT": os.getenv("LOG_AI_FULL_CONTEXT", "False").lower() == "true", # 是否记录AI可见的完整上下文日志
+    "LOG_FINAL_CONTEXT": False,  # 是否在日志中打印发送给AI的最终上下文，用于调试
+    "LOG_AI_FULL_CONTEXT": os.getenv("LOG_AI_FULL_CONTEXT", "False").lower()
+    == "true",  # 是否记录AI可见的完整上下文日志
 }

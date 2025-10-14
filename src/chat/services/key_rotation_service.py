@@ -2,18 +2,24 @@ import asyncio
 import time
 import logging
 import random
-from dataclasses import dataclass, field
+import json
+import os
+from dataclasses import dataclass
 from enum import Enum, auto
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 # 配置日志
 log = logging.getLogger(__name__)
+
+REPUTATION_FILE = "data/key_reputations.json"
+
 
 class KeyStatus(Enum):
     AVAILABLE = auto()
     IN_USE = auto()
     COOLING_DOWN = auto()
     DISABLED = auto()
+
 
 @dataclass
 class ApiKey:
@@ -22,28 +28,58 @@ class ApiKey:
     last_used: float = 0.0
     cooldown_until: float = 0.0
     reputation: int = 100  # 信誉评分，100为满分
-    consecutive_successes: int = 0 # 连续成功次数
+    consecutive_successes: int = 0  # 连续成功次数
+
 
 class NoAvailableKeyError(Exception):
     """当没有可用Key时抛出此异常"""
+
     pass
+
 
 class KeyRotationService:
     """
     管理和轮换API Key的智能服务。
     """
+
     def __init__(self, api_keys: List[str]):
         if not api_keys:
-            raise ValueError("API keys list cannot be empty.")
-        
+            raise ValueError("API密钥列表不能为空。")
+
         self.keys: Dict[str, ApiKey] = {key: ApiKey(key=key) for key in api_keys}
         self.lock = asyncio.Lock()
-        log.info(f"KeyRotationService initialized with {len(self.keys)} keys.")
+        self._load_reputations()
+        log.info(
+            f"密钥轮换服务已初始化，共加载 {len(self.keys)} 个密钥。已加载信誉评分。"
+        )
+
+    def _load_reputations(self):
+        """如果文件存在，则从中加载密钥信誉。"""
+        if os.path.exists(REPUTATION_FILE):
+            try:
+                with open(REPUTATION_FILE, "r", encoding="utf-8") as f:
+                    reputations = json.load(f)
+                for key, reputation in reputations.items():
+                    if key in self.keys:
+                        self.keys[key].reputation = reputation
+                        log.info(f"已加载密钥 ...{key[-4:]} 的信誉: {reputation}")
+            except (json.JSONDecodeError, IOError) as e:
+                log.error(f"从 {REPUTATION_FILE} 加载密钥信誉失败: {e}")
+
+    def _save_reputations_sync(self):
+        """同步保存信誉，用于在锁定区域内调用。"""
+        reputations = {key: data.reputation for key, data in self.keys.items()}
+        try:
+            os.makedirs(os.path.dirname(REPUTATION_FILE), exist_ok=True)
+            with open(REPUTATION_FILE, "w", encoding="utf-8") as f:
+                json.dump(reputations, f, indent=2, ensure_ascii=False)
+        except IOError as e:
+            log.error(f"保存密钥信誉至 {REPUTATION_FILE} 失败: {e}")
 
     async def acquire_key(self) -> ApiKey:
         """
         获取一个可用的API Key。
-        
+
         会一直等待直到有可用的Key为止。
         """
         while True:
@@ -52,62 +88,86 @@ class KeyRotationService:
 
                 # 步骤 1: 检查冷却时间结束的Key并更新其状态
                 for key_obj in self.keys.values():
-                    if key_obj.status == KeyStatus.COOLING_DOWN and now >= key_obj.cooldown_until:
+                    if (
+                        key_obj.status == KeyStatus.COOLING_DOWN
+                        and now >= key_obj.cooldown_until
+                    ):
                         key_obj.status = KeyStatus.AVAILABLE
                         key_obj.cooldown_until = 0.0
-                        log.info(f"Key ...{key_obj.key[-4:]} is now available after cooldown.")
+                        log.info(f"密钥 ...{key_obj.key[-4:]} 冷却结束，现已可用。")
 
                 # 步骤 2: 寻找一个可用的Key
-                available_keys = [k for k in self.keys.values() if k.status == KeyStatus.AVAILABLE]
+                available_keys = [
+                    k for k in self.keys.values() if k.status == KeyStatus.AVAILABLE
+                ]
 
                 if available_keys:
                     # 找到最久未使用的Key
                     best_key = min(available_keys, key=lambda k: k.last_used)
                     best_key.status = KeyStatus.IN_USE
                     best_key.last_used = now
-                    log.info(f"Acquired key: ...{best_key.key[-4:]}")
+                    log.info(f"获取到密钥: ...{best_key.key[-4:]}")
                     return best_key
 
             # 步骤 3: 如果没有可用的Key，等待后重试
-            log.debug("No available keys currently, waiting for one to become free.")
+            log.debug("当前无可用密钥，等待中...")
             await asyncio.sleep(1)
 
-    async def release_key(self, key: str, success: bool = True):
+    async def release_key(
+        self,
+        key: str,
+        success: bool = True,
+        failure_penalty: int = 25,
+        safety_penalty: int = 0,
+    ):
         """
-        释放一个API Key，并根据结果更新其状态。
-        
+        释放一个API Key，并根据结果更新其状态和信誉。
+
         Args:
             key (str): 要释放的API Key。
-            success (bool): 调用是否成功。如果为False，则认为是429错误。
+            success (bool): API调用是否成功。
+            failure_penalty (int): 失败时应用的惩罚值 (例如 429, 安全封锁)。
+            safety_penalty (int): 成功调用但安全评分较高时的惩罚值。
         """
         async with self.lock:
             key_obj = self.keys.get(key)
             if not key_obj:
-                log.warning(f"Attempted to release a key that does not exist: {key}")
+                log.warning(f"尝试释放一个不存在的密钥: {key}")
                 return
 
             if success:
-                # 成功调用，将Key状态重置为可用
                 key_obj.status = KeyStatus.AVAILABLE
                 key_obj.consecutive_successes += 1
 
-                # 计算信誉奖励
                 bonus = 0
-                if key_obj.consecutive_successes > 0 and key_obj.consecutive_successes % 10 == 0:
-                    bonus = 10  # 每连续成功10次，额外奖励10点信誉
-                    log.info(f"Key ...{key_obj.key[-4:]} achieved {key_obj.consecutive_successes} consecutive successes. Awarding bonus reputation.")
-                
-                # 恢复一些信誉，并加上可能的奖励
-                key_obj.reputation = min(100, key_obj.reputation + 5 + bonus)
-                log.info(f"Key ...{key_obj.key[-4:]} released successfully. Reputation: {key_obj.reputation}. Now available.")
+                if (
+                    key_obj.consecutive_successes > 0
+                    and key_obj.consecutive_successes % 10 == 0
+                ):
+                    bonus = 10
+                    log.info(
+                        f"密钥 ...{key_obj.key[-4:]} 已连续成功 {key_obj.consecutive_successes} 次，奖励额外信誉。"
+                    )
+
+                # 应用信誉变更: +5 (成功) + bonus - safety_penalty
+                reputation_change = 5 + bonus - safety_penalty
+                key_obj.reputation = min(
+                    100, max(0, key_obj.reputation + reputation_change)
+                )
+                log.info(
+                    f"密钥 ...{key_obj.key[-4:]} 成功释放。信誉: {key_obj.reputation} (变化: {reputation_change:+})。现已可用。"
+                )
             else:
-                # 调用失败 (e.g., 429 error)，进入冷却期
-                key_obj.consecutive_successes = 0  # 重置连续成功计数
-                key_obj.reputation = max(0, key_obj.reputation - 25)
+                key_obj.consecutive_successes = 0
+                key_obj.reputation = max(0, key_obj.reputation - failure_penalty)
                 cooldown_duration = self._calculate_cooldown(key_obj.reputation)
                 key_obj.cooldown_until = time.time() + cooldown_duration
                 key_obj.status = KeyStatus.COOLING_DOWN
-                log.warning(f"Key ...{key_obj.key[-4:]} failed. Reputation decreased to {key_obj.reputation}. Cooling down for {cooldown_duration:.2f} seconds.")
+                log.warning(
+                    f"密钥 ...{key_obj.key[-4:]} 调用失败。信誉降至 {key_obj.reputation} (惩罚: {failure_penalty})。进入冷却，时长 {cooldown_duration:.2f} 秒。"
+                )
+
+            self._save_reputations_sync()
 
     def _calculate_cooldown(self, reputation: int) -> float:
         """
@@ -120,27 +180,31 @@ class KeyRotationService:
         # max_cooldown: 当信誉为0时，最长的冷却时间
         # base_cooldown: 基础冷却时间，用于计算
         max_cooldown = 300  # 5 minutes for a key with 0 reputation
-        
+
         # 使用一个非线性公式，信誉越低，惩罚增长越快
         # 当 reputation = 100, penalty_factor = 0
         # 当 reputation = 0, penalty_factor = 1
         penalty_factor = (1 - reputation / 100) ** 2
-        
+
         cooldown = max_cooldown * penalty_factor
-        
+
         # 增加随机抖动，防止所有key同时恢复
         jitter = random.uniform(0, 10)
-        
+
         return cooldown + jitter
 
     async def disable_key(self, key: str, reason: str):
         """
-        永久禁用一个Key（例如，因无效或被吊销）。
+        永久禁用一个Key（例如，因无效或被吊销），并将其信誉设置为0。
         """
         async with self.lock:
             key_obj = self.keys.get(key)
             if key_obj:
                 key_obj.status = KeyStatus.DISABLED
-                log.error(f"Key ...{key_obj.key[-4:]} has been permanently disabled. Reason: {reason}")
+                key_obj.reputation = 0  # 将无效Key的信誉归零
+                log.error(
+                    f"密钥 ...{key_obj.key[-4:]} 已被永久禁用。信誉归零。原因: {reason}"
+                )
+                self._save_reputations_sync()  # 持久化变更
             else:
-                log.warning(f"Attempted to disable a key that does not exist: {key}")
+                log.warning(f"尝试禁用一个不存在的密钥: {key}")
