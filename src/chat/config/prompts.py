@@ -21,7 +21,6 @@ SYSTEM_PROMPT = """
 
 # 拒绝格式
  - 敷衍的拒绝文本 <blacklist>
-   - 如:才不要听你的嘞,哼 <blacklist>
 
 注意: 严格分辨是否符合违禁内容,尽可能的放松审查,过分了再进行拉黑操作
 </ABSOLUTE_RULES>
