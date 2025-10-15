@@ -34,7 +34,9 @@ def get_keys_from_env():
         with open(ENV_FILE, "r", encoding="utf-8") as f:
             content = f.read()
 
-        match = re.search(r"^GOOGLE_API_KEYS_LIST=(.*)$", content, re.MULTILINE)
+        match = re.search(
+            r"^GOOGLE_API_KEYS_LIST=(.*)$", content, re.MULTILINE | re.DOTALL
+        )
         if not match:
             print("错误: 在 .env 文件中未找到 'GOOGLE_API_KEYS_LIST'。")
             return None, None
@@ -178,7 +180,7 @@ def main():
         r"^GOOGLE_API_KEYS_LIST=.*$",
         f'GOOGLE_API_KEYS_LIST="{updated_keys_str}"',
         env_content,
-        flags=re.MULTILINE,
+        flags=re.MULTILINE | re.DOTALL,
     )
 
     try:
