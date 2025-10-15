@@ -73,12 +73,24 @@ def main():
             if key in current_keys:
                 score_counts[score] = score_counts.get(score, 0) + 1
 
-        # --- 调试代码开始 ---
-        print("\n--- 调试信息 ---")
-        print(f"从 .env 文件加载的密钥: {current_keys}")
-        print(f"从 key_reputations.json 加载的密钥: {list(reputations.keys())}")
-        print("------------------\n")
-        # --- 调试代码结束 ---
+        # --- 详细调试代码开始 ---
+        print("\n--- 详细调试信息 ---")
+        reputation_keys = reputations.keys()
+        print("逐一检查从 .env 文件加载的密钥:")
+        for key_from_env in current_keys:
+            is_found = key_from_env in reputation_keys
+            print(
+                f"  - 检查: >{key_from_env}< (长度: {len(key_from_env)}) | 是否在 reputation.json 中找到: {is_found}"
+            )
+
+        print("\n逐一检查从 key_reputations.json 加载的密钥:")
+        for key_from_json in reputation_keys:
+            is_found = key_from_json in current_keys
+            print(
+                f"  - 检查: >{key_from_json}< (长度: {len(key_from_json)}) | 是否在 .env 中找到: {is_found}"
+            )
+        print("----------------------\n")
+        # --- 详细调试代码结束 ---
 
         if score_counts:
             print("\n--- 当前密钥分数分布 ---")
