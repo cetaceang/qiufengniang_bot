@@ -270,29 +270,36 @@ class GeminiService:
             elif isinstance(emojis, str):
                 formatted = pattern.sub(emojis, formatted)
 
-        # 4. Handle blacklist marker
-        blacklist_marker = "<blacklist>"
-        if formatted.endswith(blacklist_marker):
-            formatted = formatted[: -len(blacklist_marker)].strip()
+        # 4. Handle warning marker
+        warning_marker = "<warn>"
+        if formatted.endswith(warning_marker):
+            formatted = formatted[: -len(warning_marker)].strip()
             try:
                 min_d, max_d = app_config.BLACKLIST_BAN_DURATION_MINUTES
                 ban_duration = random.randint(min_d, max_d)
-                # 确保使用 UTC 时间，与数据库的 datetime('now') 保持一致
                 expires_at = datetime.now(timezone.utc) + timedelta(
                     minutes=ban_duration
                 )
-                log.info(
-                    f"尝试拉黑用户 {user_id}，时长 {ban_duration} 分钟，计算出的过期时间 (UTC): {expires_at}"
+
+                log.info(f"用户 {user_id} 在服务器 {guild_id} 收到一次警告。")
+
+                was_blacklisted = (
+                    await chat_db_manager.record_warning_and_check_blacklist(
+                        user_id, guild_id, expires_at
+                    )
                 )
-                await chat_db_manager.add_to_blacklist(user_id, guild_id, expires_at)
-                log.info(
-                    f"用户 {user_id} 因不当请求被拉黑 {ban_duration} 分钟，过期时间: {expires_at}。"
-                )
-                await affection_service.decrease_affection_on_blacklist(
-                    user_id, guild_id
-                )
+
+                if was_blacklisted:
+                    log.info(
+                        f"用户 {user_id} 因累计3次警告被自动拉黑 {ban_duration} 分钟，过期时间: {expires_at}。"
+                    )
+                    await affection_service.decrease_affection_on_blacklist(
+                        user_id, guild_id
+                    )
+                # 如果只是警告而未拉黑，也可以考虑在这里进行轻微的好感度惩罚，但根据当前需求，我们只在拉黑时操作。
+
             except Exception as e:
-                log.error(f"拉黑用户 {user_id} 时出错: {e}")
+                log.error(f"处理用户 {user_id} 的警告时出错: {e}")
 
         return formatted
 
