@@ -976,6 +976,11 @@ class GeminiService:
         )
         final_model_name = self.model_name
 
+        if app_config.DEBUG_CONFIG["LOG_AI_FULL_CONTEXT"]:
+            log.info("--- 忏悔功能 · 完整 AI 上下文 ---")
+            log.info(prompt)
+            log.info("------------------------------------")
+
         response = await client.aio.models.generate_content(
             model=final_model_name, contents=[prompt], config=gen_config
         )
