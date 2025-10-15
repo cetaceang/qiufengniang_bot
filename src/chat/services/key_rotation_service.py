@@ -157,31 +157,67 @@ class KeyRotationService:
 
             if success:
                 key_obj.status = KeyStatus.AVAILABLE
+                reputation_change = 0
+
+                # --- 新的恢复奖励逻辑 ---
+                if key_obj.consecutive_failures > 0:
+                    # 这是一个从失败中恢复的密钥，直接将其分数锚定到90
+                    old_reputation = key_obj.reputation
+                    key_obj.reputation = 60
+                    log.info(
+                        f"密钥 ...{key_obj.key[-4:]} 从连续 {key_obj.consecutive_failures} 次失败中恢复，"
+                        f"分数已从 {old_reputation} 直接重置为 60。"
+                    )
+                    # 因为已经直接设置了分数，所以常规的reputation_change不再适用
+                    reputation_change = 0
+                else:
+                    # 这是一个常规的成功
+                    reputation_change += 5
+
                 key_obj.consecutive_successes += 1
                 key_obj.consecutive_failures = 0  # 成功后重置连续失败计数
 
-                bonus = 0
+                # 保留连续成功奖励
                 if (
                     key_obj.consecutive_successes > 0
                     and key_obj.consecutive_successes % 10 == 0
                 ):
                     bonus = 10
+                    reputation_change += bonus
                     log.info(
-                        f"密钥 ...{key_obj.key[-4:]} 已连续成功 {key_obj.consecutive_successes} 次，奖励额外信誉。"
+                        f"密钥 ...{key_obj.key[-4:]} 已连续成功 {key_obj.consecutive_successes} 次，获得额外奖励: +{bonus}"
                     )
 
-                # 应用信誉变更: +5 (成功) + bonus - safety_penalty
-                reputation_change = 5 + bonus - safety_penalty
-                key_obj.reputation = min(
-                    100, max(0, key_obj.reputation + reputation_change)
-                )
+                # 应用安全惩罚和其他奖励
+                if (
+                    key_obj.consecutive_failures == 0
+                ):  # 仅在非恢复的情况下应用其他分数变化
+                    # 保留连续成功奖励
+                    if (
+                        key_obj.consecutive_successes > 0
+                        and key_obj.consecutive_successes % 10 == 0
+                    ):
+                        bonus = 10
+                        reputation_change += bonus
+                        log.info(
+                            f"密钥 ...{key_obj.key[-4:]} 已连续成功 {key_obj.consecutive_successes} 次，获得额外奖励: +{bonus}"
+                        )
+
+                    reputation_change -= safety_penalty
+                    key_obj.reputation += reputation_change
+
+                # 重置计数器
+                key_obj.consecutive_successes += 1
+                key_obj.consecutive_failures = 0
+
                 log.info(
-                    f"密钥 ...{key_obj.key[-4:]} 成功释放。信誉: {key_obj.reputation} (变化: {reputation_change:+})。现已可用。"
+                    f"密钥 ...{key_obj.key[-4:]} 成功释放。信誉: {key_obj.reputation}。现已可用。"
                 )
             else:
                 key_obj.consecutive_successes = 0
                 key_obj.consecutive_failures += 1  # 失败后增加连续失败计数
-                key_obj.reputation = max(0, key_obj.reputation - failure_penalty)
+                # 移除分数下限
+                key_obj.reputation -= failure_penalty
                 cooldown_duration = self._calculate_cooldown(key_obj.reputation)
                 key_obj.cooldown_until = time.time() + cooldown_duration
                 key_obj.status = KeyStatus.COOLING_DOWN
