@@ -34,9 +34,9 @@ def get_keys_from_env():
         with open(ENV_FILE, "r", encoding="utf-8") as f:
             content = f.read()
 
-        match = re.search(r"^GEMINI_API_KEYS=(.*)$", content, re.MULTILINE)
+        match = re.search(r"^GOOGLE_API_KEYS_LIST=(.*)$", content, re.MULTILINE)
         if not match:
-            print("错误: 在 .env 文件中未找到 'GEMINI_API_KEYS'。")
+            print("错误: 在 .env 文件中未找到 'GOOGLE_API_KEYS_LIST'。")
             return None, None
 
         keys_str = match.group(1).strip()
@@ -44,7 +44,12 @@ def get_keys_from_env():
         if keys_str.startswith('"') and keys_str.endswith('"'):
             keys_str = keys_str[1:-1]
 
-        keys = [key.strip() for key in keys_str.split(",") if key.strip()]
+        # 对每个分割后的 key 去除可能存在的引号
+        keys = [
+            key.strip().strip('"').strip("'")
+            for key in keys_str.split(",")
+            if key.strip()
+        ]
         return keys, content
     except IOError as e:
         print(f"错误: 读取 .env 文件失败: {e}")
@@ -67,6 +72,13 @@ def main():
         for key, score in reputations.items():
             if key in current_keys:
                 score_counts[score] = score_counts.get(score, 0) + 1
+
+        # --- 调试代码开始 ---
+        print("\n--- 调试信息 ---")
+        print(f"从 .env 文件加载的密钥: {current_keys}")
+        print(f"从 key_reputations.json 加载的密钥: {list(reputations.keys())}")
+        print("------------------\n")
+        # --- 调试代码结束 ---
 
         if score_counts:
             print("\n--- 当前密钥分数分布 ---")
@@ -142,8 +154,8 @@ def main():
 
     # 使用正则表达式替换 .env 文件中的行
     new_env_content = re.sub(
-        r"^GEMINI_API_KEYS=.*$",
-        f'GEMINI_API_KEYS="{updated_keys_str}"',
+        r"^GOOGLE_API_KEYS_LIST=.*$",
+        f'GOOGLE_API_KEYS_LIST="{updated_keys_str}"',
         env_content,
         flags=re.MULTILINE,
     )
