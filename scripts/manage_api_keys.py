@@ -53,6 +53,31 @@ def get_keys_from_env():
 
 def main():
     """主执行函数"""
+    # 检查是否提供了 'status' 参数，用于仅显示状态
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "status":
+        print("--- 正在检查 API 密钥分数分布 ---")
+        reputations = load_reputations()
+        if reputations is None:
+            return
+        current_keys, _ = get_keys_from_env()
+        if current_keys is None:
+            return
+
+        score_counts = {}
+        for key, score in reputations.items():
+            if key in current_keys:
+                score_counts[score] = score_counts.get(score, 0) + 1
+
+        if score_counts:
+            print("\n--- 当前密钥分数分布 ---")
+            sorted_scores = sorted(score_counts.keys())
+            for score in sorted_scores:
+                print(f"  - 分数: {score}, 密钥数量: {score_counts[score]}")
+            print("-------------------------")
+        else:
+            print("没有找到与当前 .env 中密钥匹配的信誉数据。")
+        return  # 仅显示状态后退出
+
     print("--- API 密钥信誉管理脚本 ---")
 
     reputations = load_reputations()
@@ -65,6 +90,20 @@ def main():
 
     print(f"当前 .env 文件中共有 {len(current_keys)} 个密钥。")
     print(f"已加载 {len(reputations)} 个密钥的信誉数据。")
+
+    # 统计并显示每个分数的密钥数量
+    score_counts = {}
+    for key, score in reputations.items():
+        if key in current_keys:
+            score_counts[score] = score_counts.get(score, 0) + 1
+
+    if score_counts:
+        print("\n--- 当前密钥分数分布 ---")
+        # 按分数排序以获得更好的可读性
+        sorted_scores = sorted(score_counts.keys())
+        for score in sorted_scores:
+            print(f"  - 分数: {score}, 密钥数量: {score_counts[score]}")
+        print("-------------------------\n")
 
     try:
         threshold_str = input(
@@ -85,10 +124,11 @@ def main():
         print(f"没有找到信誉分数低于 {threshold} 的密钥。无需任何操作。")
         return
 
-    print("\n警告: 以下密钥的信誉分数低于阈值，将被从 .env 文件中移除:")
+    print(
+        f"\n警告: 发现 {len(keys_to_remove)} 个密钥的信誉分数低于阈值，将被从 .env 文件中移除:"
+    )
     for key in keys_to_remove:
-        # 为了安全，只显示部分密钥
-        print(f"  - ...{key[-4:]} (分数: {reputations.get(key, 'N/A')})")
+        print(f"  - {key} (分数: {reputations.get(key, 'N/A')})")
 
     confirm = input("\n您确定要永久移除以上所列的密钥吗? (y/n): ").lower()
 
