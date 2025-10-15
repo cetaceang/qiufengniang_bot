@@ -29,6 +29,7 @@ class ApiKey:
     cooldown_until: float = 0.0
     reputation: int = 100  # 信誉评分，100为满分
     consecutive_successes: int = 0  # 连续成功次数
+    consecutive_failures: int = 0  # 新增：连续失败次数
 
 
 class NoAvailableKeyError(Exception):
@@ -59,16 +60,35 @@ class KeyRotationService:
             try:
                 with open(REPUTATION_FILE, "r", encoding="utf-8") as f:
                     reputations = json.load(f)
-                for key, reputation in reputations.items():
+                for key, data in reputations.items():
                     if key in self.keys:
-                        self.keys[key].reputation = reputation
-                        log.info(f"已加载密钥 ...{key[-4:]} 的信誉: {reputation}")
+                        # 兼容旧格式 (值为整数) 和新格式 (值为字典)
+                        if isinstance(data, dict):
+                            self.keys[key].reputation = data.get("reputation", 100)
+                            self.keys[key].consecutive_failures = data.get(
+                                "consecutive_failures", 0
+                            )
+                        else:
+                            self.keys[key].reputation = data
+                            self.keys[
+                                key
+                            ].consecutive_failures = 0  # 旧格式没有失败记录
+                        log.info(
+                            f"已加载密钥 ...{key[-4:]} 的信誉: {self.keys[key].reputation}, "
+                            f"连续失败: {self.keys[key].consecutive_failures}"
+                        )
             except (json.JSONDecodeError, IOError) as e:
                 log.error(f"从 {REPUTATION_FILE} 加载密钥信誉失败: {e}")
 
     def _save_reputations_sync(self):
         """同步保存信誉，用于在锁定区域内调用。"""
-        reputations = {key: data.reputation for key, data in self.keys.items()}
+        reputations = {
+            key: {
+                "reputation": data.reputation,
+                "consecutive_failures": data.consecutive_failures,
+            }
+            for key, data in self.keys.items()
+        }
         try:
             os.makedirs(os.path.dirname(REPUTATION_FILE), exist_ok=True)
             with open(REPUTATION_FILE, "w", encoding="utf-8") as f:
@@ -138,6 +158,7 @@ class KeyRotationService:
             if success:
                 key_obj.status = KeyStatus.AVAILABLE
                 key_obj.consecutive_successes += 1
+                key_obj.consecutive_failures = 0  # 成功后重置连续失败计数
 
                 bonus = 0
                 if (
@@ -159,6 +180,7 @@ class KeyRotationService:
                 )
             else:
                 key_obj.consecutive_successes = 0
+                key_obj.consecutive_failures += 1  # 失败后增加连续失败计数
                 key_obj.reputation = max(0, key_obj.reputation - failure_penalty)
                 cooldown_duration = self._calculate_cooldown(key_obj.reputation)
                 key_obj.cooldown_until = time.time() + cooldown_duration

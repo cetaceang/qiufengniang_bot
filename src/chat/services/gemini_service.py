@@ -415,17 +415,27 @@ class GeminiService:
                                     log.warning(
                                         f"密钥 ...{key_obj.key[-4:]} 的所有 {max_attempts} 次重试均失败。将进入冷却。"
                                     )
+                                    # --- 渐进式惩罚逻辑 ---
+                                    base_penalty = 10
+                                    consecutive_failures = (
+                                        key_obj.consecutive_failures + 1
+                                    )  # +1 是因为本次失败也要计算在内
+                                    failure_penalty = (
+                                        base_penalty * consecutive_failures
+                                    )
+                                    log.warning(
+                                        f"密钥 ...{key_obj.key[-4:]} 已连续失败 {consecutive_failures} 次。"
+                                        f"本次惩罚分值: {failure_penalty}"
+                                    )
                                     key_should_be_cooled_down = True
 
                             elif status_code == 403:
                                 log.error(
-                                    f"密钥 ...{key_obj.key[-4:]} 无效或已被吊销 (403 Forbidden)。正在禁用该密钥。"
+                                    f"密钥 ...{key_obj.key[-4:]} 无效或已被吊销 (403 Forbidden)。将施加毁灭性惩罚。"
                                 )
-                                await self.key_rotation_service.disable_key(
-                                    key_obj.key, reason=str(e)
-                                )
-                                key_is_invalid = True
-                                break
+                                failure_penalty = 101  # 毁灭性惩罚
+                                key_should_be_cooled_down = True
+                                break  # 直接跳出重试循环
 
                             else:
                                 log.error(
@@ -433,6 +443,18 @@ class GeminiService:
                                     exc_info=True,
                                 )
                                 if isinstance(e, genai_errors.ServerError):
+                                    # 对于服务器错误，也采用渐进式惩罚
+                                    base_penalty = 15  # 服务器错误的基础惩罚可以稍高
+                                    consecutive_failures = (
+                                        key_obj.consecutive_failures + 1
+                                    )
+                                    failure_penalty = (
+                                        base_penalty * consecutive_failures
+                                    )
+                                    log.warning(
+                                        f"密钥 ...{key_obj.key[-4:]} 遭遇服务器错误，已连续失败 {consecutive_failures} 次。"
+                                        f"本次惩罚分值: {failure_penalty}"
+                                    )
                                     key_should_be_cooled_down = True
                                     break
                                 else:
