@@ -73,24 +73,33 @@ def main():
             if key in current_keys:
                 score_counts[score] = score_counts.get(score, 0) + 1
 
-        # --- 详细调试代码开始 ---
-        print("\n--- 详细调试信息 ---")
-        reputation_keys = reputations.keys()
-        print("逐一检查从 .env 文件加载的密钥:")
-        for key_from_env in current_keys:
-            is_found = key_from_env in reputation_keys
-            print(
-                f"  - 检查: >{key_from_env}< (长度: {len(key_from_env)}) | 是否在 reputation.json 中找到: {is_found}"
-            )
+        # --- 将详细调试信息写入文件 ---
+        try:
+            with open("debug_output.txt", "w", encoding="utf-8") as f:
+                f.write("--- 详细调试信息 ---\n")
+                reputation_keys = reputations.keys()
 
-        print("\n逐一检查从 key_reputations.json 加载的密钥:")
-        for key_from_json in reputation_keys:
-            is_found = key_from_json in current_keys
+                f.write("\n逐一检查从 .env 文件加载的密钥:\n")
+                for key_from_env in current_keys:
+                    is_found = key_from_env in reputation_keys
+                    f.write(
+                        f"  - 检查: >{key_from_env}< (长度: {len(key_from_env)}) | 是否在 reputation.json 中找到: {is_found}\n"
+                    )
+
+                f.write("\n逐一检查从 key_reputations.json 加载的密钥:\n")
+                for key_from_json in reputation_keys:
+                    is_found = key_from_json in current_keys
+                    f.write(
+                        f"  - 检查: >{key_from_json}< (长度: {len(key_from_json)}) | 是否在 .env 中找到: {is_found}\n"
+                    )
+
+                f.write("\n--- 调试结束 ---\n")
             print(
-                f"  - 检查: >{key_from_json}< (长度: {len(key_from_json)}) | 是否在 .env 中找到: {is_found}"
+                "\n[诊断] 详细调试信息已写入项目根目录下的 debug_output.txt 文件。请检查该文件。\n"
             )
-        print("----------------------\n")
-        # --- 详细调试代码结束 ---
+        except Exception as e:
+            print(f"[诊断] 写入调试文件时出错: {e}")
+        # --- 调试代码结束 ---
 
         if score_counts:
             print("\n--- 当前密钥分数分布 ---")
