@@ -149,75 +149,37 @@ def add_keys_to_env():
         print(f"错误: 写入 .env 文件失败: {e}")
 
 
-def main():
-    """主执行函数"""
-    # 检查是否提供了 'status' 或 'reformat' 或 'add' 参数
-    if len(sys.argv) > 1:
-        command = sys.argv[1].lower()
-        if command == "status":
-            print("--- 正在检查 API 密钥分数分布 ---")
-            reputations = load_reputations()
-            if reputations is None:
-                return
-            current_keys, _ = get_keys_from_env()
-            if current_keys is None:
-                return
+def run_status_check():
+    """执行状态检查的功能"""
+    print("--- 正在检查 API 密钥分数分布 ---")
+    reputations = load_reputations()
+    if reputations is None:
+        return
+    current_keys, _ = get_keys_from_env()
+    if current_keys is None:
+        return
 
-            score_counts = {}
-            for key, data in reputations.items():
-                if key in current_keys:
-                    # 确保 data 是字典并且有 'reputation' 键
-                    if isinstance(data, dict) and "reputation" in data:
-                        score = data["reputation"]
-                        score_counts[score] = score_counts.get(score, 0) + 1
+    score_counts = {}
+    for key, data in reputations.items():
+        if key in current_keys:
+            if isinstance(data, dict) and "reputation" in data:
+                score = data["reputation"]
+                score_counts[score] = score_counts.get(score, 0) + 1
 
-            # --- 将详细调试信息写入文件 ---
-            try:
-                with open("debug_output.txt", "w", encoding="utf-8") as f:
-                    f.write("--- 详细调试信息 ---\n")
-                    reputation_keys = reputations.keys()
+    if score_counts:
+        print("\n--- 当前密钥分数分布 ---")
+        sorted_scores = sorted(
+            [s for s in score_counts.keys() if isinstance(s, (int, float))]
+        )
+        for score in sorted_scores:
+            print(f"  - 分数: {score}, 密钥数量: {score_counts[score]}")
+        print("-------------------------")
+    else:
+        print("没有找到与当前 .env 中密钥匹配的信誉数据。")
 
-                    f.write("\n逐一检查从 .env 文件加载的密钥:\n")
-                    for key_from_env in current_keys:
-                        is_found = key_from_env in reputation_keys
-                        f.write(
-                            f"  - 检查: >{key_from_env}< (长度: {len(key_from_env)}) | 是否在 reputation.json 中找到: {is_found}\n"
-                        )
 
-                    f.write("\n逐一检查从 key_reputations.json 加载的密钥:\n")
-                    for key_from_json in reputation_keys:
-                        is_found = key_from_json in current_keys
-                        f.write(
-                            f"  - 检查: >{key_from_json}< (长度: {len(key_from_json)}) | 是否在 .env 中找到: {is_found}\n"
-                        )
-
-                    f.write("\n--- 调试结束 ---\n")
-                print(
-                    "\n[诊断] 详细调试信息已写入项目根目录下的 debug_output.txt 文件。请检查该文件。\n"
-                )
-            except Exception as e:
-                print(f"[诊断] 写入调试文件时出错: {e}")
-            # --- 调试代码结束 ---
-
-            if score_counts:
-                print("\n--- 当前密钥分数分布 ---")
-                # 按分数排序，确保是数字类型
-                sorted_scores = sorted(
-                    [s for s in score_counts.keys() if isinstance(s, (int, float))]
-                )
-                for score in sorted_scores:
-                    print(f"  - 分数: {score}, 密钥数量: {score_counts[score]}")
-                print("-------------------------")
-            else:
-                print("没有找到与当前 .env 中密钥匹配的信誉数据。")
-            return  # 仅显示状态后退出
-        elif command == "reformat":
-            reformat_keys_in_env()
-            return
-        elif command == "add":
-            add_keys_to_env()
-            return
-
+def run_default_removal():
+    """执行默认的交互式密钥移除功能"""
     print("--- API 密钥信誉管理脚本 ---")
 
     reputations = load_reputations()
@@ -231,32 +193,16 @@ def main():
     print(f"当前 .env 文件中共有 {len(current_keys)} 个密钥。")
     print(f"已加载 {len(reputations)} 个密钥的信誉数据。")
 
-    # 统计并显示每个分数的密钥数量
-    score_counts = {}
-    for key, data in reputations.items():
-        if key in current_keys:
-            if isinstance(data, dict) and "reputation" in data:
-                score = data["reputation"]
-                score_counts[score] = score_counts.get(score, 0) + 1
-
-    if score_counts:
-        print("\n--- 当前密钥分数分布 ---")
-        # 按分数排序以获得更好的可读性
-        # 按分数排序，确保是数字类型
-        sorted_scores = sorted(
-            [s for s in score_counts.keys() if isinstance(s, (int, float))]
-        )
-        for score in sorted_scores:
-            print(f"  - 分数: {score}, 密钥数量: {score_counts[score]}")
-        print("-------------------------\n")
+    # 首先，显示分数分布
+    run_status_check()
 
     try:
         threshold_str = input(
-            "请输入要移除的密钥的信誉分数阈值 (例如, 输入 10 将移除所有分数低于 10 的密钥): "
+            "\n请输入要移除的密钥的信誉分数阈值 (例如, 输入 10 将移除所有分数低于 10 的密钥): "
         )
         threshold = int(threshold_str)
-    except ValueError:
-        print("错误: 无效的数字输入。操作已中止。")
+    except (ValueError, KeyboardInterrupt):
+        print("\n无效输入或用户中断。操作已取消。")
         return
 
     keys_to_remove = {
@@ -283,24 +229,24 @@ def main():
         )
         print(f"  - {key} (分数: {score_display})")
 
-    confirm = input("\n您确定要永久移除以上所列的密钥吗? (y/n): ").lower()
+    try:
+        confirm = input("\n您确定要永久移除以上所列的密钥吗? (y/n): ").lower()
+    except KeyboardInterrupt:
+        print("\n操作已取消。")
+        return
 
     if confirm != "y":
         print("操作已取消。")
         return
 
-    # 从当前密钥列表中过滤掉要移除的密钥
     updated_keys = [key for key in current_keys if key not in keys_to_remove]
 
-    # 格式化更新后的密钥列表为多行
     if updated_keys:
         formatted_keys_str = ",\n  ".join(updated_keys)
         new_keys_block = f'GOOGLE_API_KEYS_LIST="\n  {formatted_keys_str}\n"'
     else:
-        # 如果所有密钥都被删除，则留空
         new_keys_block = 'GOOGLE_API_KEYS_LIST=""'
 
-    # 使用正则表达式替换 .env 文件中的行
     new_env_content = re.sub(
         r"^GOOGLE_API_KEYS_LIST=.*$",
         new_keys_block,
@@ -315,6 +261,23 @@ def main():
         print(f"剩余 {len(updated_keys)} 个密钥。")
     except IOError as e:
         print(f"错误: 写入 .env 文件失败: {e}")
+
+
+def main():
+    """主执行函数，现在仅用于命令分发"""
+    if len(sys.argv) > 1:
+        command = sys.argv[1].lower()
+        if command == "status":
+            run_status_check()
+        elif command == "reformat":
+            reformat_keys_in_env()
+        elif command == "add":
+            add_keys_to_env()
+        else:
+            print(f"错误: 未知命令 '{command}'")
+            print("可用命令: status, reformat, add")
+    else:
+        run_default_removal()
 
 
 if __name__ == "__main__":
