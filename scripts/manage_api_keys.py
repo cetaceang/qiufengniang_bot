@@ -69,16 +69,16 @@ def reformat_keys_in_env():
         print("在 .env 文件中没有找到要格式化的密钥。")
         return
 
-    # 格式化密钥列表，每个密钥占一行并带有缩进
-    formatted_keys_str = ",\n  ".join(current_keys)
-    new_keys_block = f'GOOGLE_API_KEYS_LIST="\n  {formatted_keys_str}\n"'
+    # 格式化密钥列表，每个密钥占一行
+    formatted_keys_str = ",\n".join(current_keys)
+    new_keys_block = f'GOOGLE_API_KEYS_LIST="{formatted_keys_str}"'
 
-    # 使用正则表达式替换 .env 文件中的行
+    # 使用正则表达式替换 .env 文件中的行 (移除 DOTALL 防止贪婪匹配)
     new_env_content = re.sub(
         r"^GOOGLE_API_KEYS_LIST=.*$",
         new_keys_block,
         env_content,
-        flags=re.MULTILINE | re.DOTALL,
+        flags=re.MULTILINE,
     )
 
     try:
@@ -129,15 +129,15 @@ def add_keys_to_env():
     updated_keys = current_keys + unique_new_keys
 
     # 格式化更新后的密钥列表为多行
-    formatted_keys_str = ",\n  ".join(updated_keys)
-    new_keys_block = f'GOOGLE_API_KEYS_LIST="\n  {formatted_keys_str}\n"'
+    formatted_keys_str = ",\n".join(updated_keys)
+    new_keys_block = f'GOOGLE_API_KEYS_LIST="{formatted_keys_str}"'
 
-    # 使用正则表达式替换 .env 文件中的行
+    # 使用正则表达式替换 .env 文件中的行 (移除 DOTALL 防止贪婪匹配)
     new_env_content = re.sub(
         r"^GOOGLE_API_KEYS_LIST=.*$",
         new_keys_block,
         env_content,
-        flags=re.MULTILINE | re.DOTALL,
+        flags=re.MULTILINE,
     )
 
     try:
@@ -242,16 +242,18 @@ def run_default_removal():
     updated_keys = [key for key in current_keys if key not in keys_to_remove]
 
     if updated_keys:
-        formatted_keys_str = ",\n  ".join(updated_keys)
-        new_keys_block = f'GOOGLE_API_KEYS_LIST="\n  {formatted_keys_str}\n"'
+        # 格式化密钥列表，每个密钥占一行
+        formatted_keys_str = ",\n".join(updated_keys)
+        new_keys_block = f'GOOGLE_API_KEYS_LIST="{formatted_keys_str}"'
     else:
         new_keys_block = 'GOOGLE_API_KEYS_LIST=""'
 
+    # 使用正则表达式替换 .env 文件中的行 (移除 DOTALL 防止贪婪匹配)
     new_env_content = re.sub(
         r"^GOOGLE_API_KEYS_LIST=.*$",
         new_keys_block,
         env_content,
-        flags=re.MULTILINE | re.DOTALL,
+        flags=re.MULTILINE,
     )
 
     try:
