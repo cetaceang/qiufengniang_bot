@@ -71,9 +71,12 @@ def main():
             return
 
         score_counts = {}
-        for key, score in reputations.items():
+        for key, data in reputations.items():
             if key in current_keys:
-                score_counts[score] = score_counts.get(score, 0) + 1
+                # 确保 data 是字典并且有 'reputation' 键
+                if isinstance(data, dict) and "reputation" in data:
+                    score = data["reputation"]
+                    score_counts[score] = score_counts.get(score, 0) + 1
 
         # --- 将详细调试信息写入文件 ---
         try:
@@ -105,7 +108,10 @@ def main():
 
         if score_counts:
             print("\n--- 当前密钥分数分布 ---")
-            sorted_scores = sorted(score_counts.keys())
+            # 按分数排序，确保是数字类型
+            sorted_scores = sorted(
+                [s for s in score_counts.keys() if isinstance(s, (int, float))]
+            )
             for score in sorted_scores:
                 print(f"  - 分数: {score}, 密钥数量: {score_counts[score]}")
             print("-------------------------")
@@ -128,14 +134,19 @@ def main():
 
     # 统计并显示每个分数的密钥数量
     score_counts = {}
-    for key, score in reputations.items():
+    for key, data in reputations.items():
         if key in current_keys:
-            score_counts[score] = score_counts.get(score, 0) + 1
+            if isinstance(data, dict) and "reputation" in data:
+                score = data["reputation"]
+                score_counts[score] = score_counts.get(score, 0) + 1
 
     if score_counts:
         print("\n--- 当前密钥分数分布 ---")
         # 按分数排序以获得更好的可读性
-        sorted_scores = sorted(score_counts.keys())
+        # 按分数排序，确保是数字类型
+        sorted_scores = sorted(
+            [s for s in score_counts.keys() if isinstance(s, (int, float))]
+        )
         for score in sorted_scores:
             print(f"  - 分数: {score}, 密钥数量: {score_counts[score]}")
         print("-------------------------\n")
@@ -151,8 +162,10 @@ def main():
 
     keys_to_remove = {
         key
-        for key, score in reputations.items()
-        if key in current_keys and score < threshold
+        for key, data in reputations.items()
+        if key in current_keys
+        and isinstance(data, dict)
+        and data.get("reputation", float("inf")) < threshold
     }
 
     if not keys_to_remove:
@@ -163,7 +176,13 @@ def main():
         f"\n警告: 发现 {len(keys_to_remove)} 个密钥的信誉分数低于阈值，将被从 .env 文件中移除:"
     )
     for key in keys_to_remove:
-        print(f"  - {key} (分数: {reputations.get(key, 'N/A')})")
+        reputation_value = reputations.get(key, {})
+        score_display = (
+            reputation_value.get("reputation", "N/A")
+            if isinstance(reputation_value, dict)
+            else "格式错误"
+        )
+        print(f"  - {key} (分数: {score_display})")
 
     confirm = input("\n您确定要永久移除以上所列的密钥吗? (y/n): ").lower()
 
