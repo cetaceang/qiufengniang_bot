@@ -429,9 +429,12 @@ class GeminiService:
                                     )
                                     key_should_be_cooled_down = True
 
-                            elif status_code == 403:
+                            elif status_code == 403 or (
+                                status_code == 400
+                                and "API_KEY_INVALID" in error_str.upper()
+                            ):
                                 log.error(
-                                    f"密钥 ...{key_obj.key[-4:]} 无效或已被吊销 (403 Forbidden)。将施加毁灭性惩罚。"
+                                    f"密钥 ...{key_obj.key[-4:]} 无效 (状态码: {status_code})。将施加毁灭性惩罚。"
                                 )
                                 failure_penalty = 101  # 毁灭性惩罚
                                 key_should_be_cooled_down = True
