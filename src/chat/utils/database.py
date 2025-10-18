@@ -220,6 +220,19 @@ class ChatDatabaseManager:
                 );
             """)
 
+            # --- 新增：类脑币借贷表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS coin_loans (
+                    loan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active', -- 'active', 'paid'
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    paid_at TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES user_coins(user_id) ON DELETE CASCADE
+                );
+            """)
+
             # 检查并向 user_coins 添加列
             cursor.execute("PRAGMA table_info(user_coins);")
             columns_coins = [info[1] for info in cursor.fetchall()]

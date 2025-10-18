@@ -118,6 +118,9 @@ CONFESSION_CONFIG = {
 COIN_CONFIG = {
     "DAILY_FIRST_CHAT_REWARD": 50,  # 每日首次与AI对话获得的类脑币奖励
     "FORUM_POST_REWARD": 200,  # 在指定论坛频道发帖获得的类脑币奖励
+    "MAX_LOAN_AMOUNT": 1000,  # 单次最大可借金额
+    "TRANSFER_TAX_RATE": 0.05,  # 转账税率 (5%)
+    "LOAN_THUMBNAIL_URL": "https://cdn.discordapp.com/attachments/1403347767912562728/1429130259541917716/3_229109312468835_00001_.png",  # 借贷中心缩略图URL
 }
 
 # --- 个人记忆功能 ---
