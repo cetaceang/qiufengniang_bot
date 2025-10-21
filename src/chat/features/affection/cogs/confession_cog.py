@@ -43,7 +43,7 @@ class ConfessionCog(commands.Cog):
                 )
                 return
 
-        await interaction.response.defer()
+        await interaction.response.send_message("类脑娘正在聆听你的忏悔...")
 
         try:
             affection_status = await self.affection_service.get_affection_status(
@@ -95,8 +95,8 @@ class ConfessionCog(commands.Cog):
             )
 
             if not ai_response:
-                await interaction.followup.send(
-                    "类脑娘现在似乎不想听你的忏悔，请稍后再试。", ephemeral=True
+                await interaction.edit_original_response(
+                    content="类脑娘现在似乎不想听你的忏悔，请稍后再试。"
                 )
                 return
 
@@ -138,12 +138,12 @@ class ConfessionCog(commands.Cog):
 
             embed.set_footer(text="类脑娘对你的忏悔做出了一些回应...")
 
-            await interaction.followup.send(embed=embed)
+            await interaction.edit_original_response(content=None, embed=embed)
 
         except Exception as e:
             print(f"Error during confession: {e}")
-            await interaction.followup.send(
-                "处理你的忏悔时出现了一个意想不到的错误。", ephemeral=True
+            await interaction.edit_original_response(
+                content="处理你的忏悔时出现了一个意想不到的错误。"
             )
 
 
