@@ -16,12 +16,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class FeedingCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.affection_service = AffectionService()
         self.coin_service = CoinService()
-        self.gemini_service = gemini_service # 使用全局实例
+        self.gemini_service = gemini_service  # 使用全局实例
         self.feeding_service = feeding_service
 
     @app_commands.command(name="投喂", description="在吃饭?给类脑娘来一口怎么样")
@@ -38,32 +39,37 @@ class FeedingCog(commands.Cog):
                 await interaction.response.send_message(message, ephemeral=False)
                 return
 
-        await interaction.response.defer(ephemeral=False)
-        
-        if not image.content_type.startswith('image/'):
-            await interaction.followup.send("欸？这个不能吃啦，给我看看真正的食物图片嘛！")
+        await interaction.response.send_message("类脑娘正在嚼嚼嚼...", ephemeral=False)
+
+        if not image.content_type.startswith("image/"):
+            await interaction.edit_original_response(
+                content="欸？这个不能吃啦，给我看看真正的食物图片嘛！"
+            )
             return
 
         try:
             image_bytes = await image.read()
-            
+
             # 构建包含类脑娘人设的提示词
             persona_part = extract_persona_prompt(SYSTEM_PROMPT)
             prompt = f"{persona_part}\n\n现在，请你对这张图片中的食物进行打分（1-10分），并给出一个简短的、符合你人设的评价。评价中可以包含你对食物的喜好、吐槽或俏皮话，并直接包含分数。\n在评价文本的最后，请严格按照以下格式附加上好感度和类脑币奖励，不要添加任何额外说明：<affection:好感度奖励;coins:类脑币奖励>\n例如：\n这个看起来好好吃！我给10分！<affection:+5;coins:+50>"
-            
+
             response_text = await self.gemini_service.generate_text_with_image(
-                prompt=prompt,
-                image_bytes=image_bytes,
-                mime_type=image.content_type
+                prompt=prompt, image_bytes=image_bytes, mime_type=image.content_type
             )
 
             if not response_text:
-                await interaction.followup.send("抱歉，我有点累了，暂时无法评价呢。")
+                await interaction.edit_original_response(
+                    content="抱歉，我有点累了，暂时无法评价呢。"
+                )
                 return
 
             # 使用正则表达式解析返回的文本
             import re
-            pattern = re.compile(r"(.*?)<affection:([+-]?\d+);coins:([+-]?\d+)>", re.DOTALL)
+
+            pattern = re.compile(
+                r"(.*?)<affection:([+-]?\d+);coins:([+-]?\d+)>", re.DOTALL
+            )
             match = pattern.search(response_text)
 
             if not match:
@@ -77,7 +83,9 @@ class FeedingCog(commands.Cog):
                 affection_gain = int(match.group(2))
                 coin_gain = int(match.group(3))
 
-            await self.affection_service.add_affection_points(user_id, guild_id, affection_gain)
+            await self.affection_service.add_affection_points(
+                user_id, guild_id, affection_gain
+            )
 
             # 只有当 coin_gain 是正数时才增加类脑币
             if coin_gain > 0:
@@ -85,24 +93,27 @@ class FeedingCog(commands.Cog):
 
             # 替换表情并添加奖励消息
             evaluation_with_emojis = replace_emojis(evaluation)
-            
+
             # 格式化系统提示，仅在获得奖励时显示
             system_message = ""
             if coin_gain > 0:
                 system_message = f"> 你获得了 {coin_gain} 枚类脑币！"
-            
+
             # 创建 Embed
             embed_description = evaluation_with_emojis
             if system_message:
                 embed_description += f"\n\n{system_message}"
-            
+
             embed = discord.Embed(
                 description=embed_description,
-                color=discord.Color.pink()  # 你可以自定义颜色
+                color=discord.Color.pink(),  # 你可以自定义颜色
             )
-            
+
             # 设置作者信息
-            embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+            embed.set_author(
+                name=interaction.user.display_name,
+                icon_url=interaction.user.display_avatar.url,
+            )
 
             # 从配置中获取图片 URL
             image_url = FEEDING_CONFIG.get("RESPONSE_IMAGE_URL")
@@ -119,14 +130,21 @@ class FeedingCog(commands.Cog):
             # 记录投喂事件
             await self.feeding_service.record_feeding(user_id)
 
-            await interaction.followup.send(embed=embed, file=file)
+            await interaction.edit_original_response(
+                content=None, embed=embed, attachments=[file]
+            )
 
         except json.JSONDecodeError:
             logger.error(f"Failed to decode JSON response from Gemini: {response_text}")
-            await interaction.followup.send("呜... 我、我有点尝不出来味道... 你能等一下再喂我吗？")
+            await interaction.edit_original_response(
+                content="呜... 我、我有点尝不出来味道... 你能等一下再喂我吗？"
+            )
         except Exception as e:
             logger.error(f"Error processing feeding command: {e}")
-            await interaction.followup.send("啊呀，不小心噎着了！等、等我一下，稍后再试试看！")
+            await interaction.edit_original_response(
+                content="啊呀，不小心噎着了！等、等我一下，稍后再试试看！"
+            )
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(FeedingCog(bot))
