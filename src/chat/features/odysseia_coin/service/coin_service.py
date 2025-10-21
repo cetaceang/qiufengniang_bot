@@ -612,6 +612,35 @@ class CoinService:
                 False,
             )
 
+    async def purchase_event_item(
+        self, user_id: int, item_name: str, price: int
+    ) -> tuple[bool, str, Optional[int]]:
+        """
+        处理用户购买活动商品的逻辑。
+        这是一个简化版的购买流程，只处理扣款。
+        返回 (success: bool, message: str, new_balance: Optional[int])
+        """
+        if price < 0:
+            return False, "商品价格不能为负数。", None
+
+        current_balance = await self.get_balance(user_id)
+        if current_balance < price:
+            return (
+                False,
+                f"你的余额不足！需要 {price} 类脑币，但你只有 {current_balance}。",
+                None,
+            )
+
+        # 仅当费用大于0时才扣款
+        new_balance = current_balance
+        if price > 0:
+            reason = f"购买活动商品: {item_name}"
+            new_balance = await self.remove_coins(user_id, price, reason)
+            if new_balance is None:
+                return False, "购买失败，无法扣除类脑币。", None
+
+        return True, f"成功购买 {item_name}！", new_balance
+
     async def _add_item_to_inventory(self, user_id: int, item_id: int, quantity: int):
         """将物品添加到用户背包的内部方法"""
 

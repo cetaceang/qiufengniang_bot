@@ -23,8 +23,50 @@ from src.chat.config import chat_config
 from src.chat.features.affection.service.gift_service import GiftService
 from src.chat.features.affection.service.affection_service import affection_service
 from src.chat.services.gemini_service import gemini_service
+from src.chat.services.event_service import event_service
+from src.chat.features.events.ui.event_panel_view import EventPanelView
 
 log = logging.getLogger(__name__)
+
+
+def create_event_promo_embed(event_data: Dict[str, Any]) -> discord.Embed:
+    """创建一个吸引人的活动推广Embed"""
+    embed = discord.Embed(
+        title=f"🎉 正在进行中: {event_data['event_name']} 🎉",
+        description=event_data.get("description", "快来参加我们的特别活动吧！"),
+        color=discord.Color.purple(),
+    )
+    if event_data.get("thumbnail_url"):
+        embed.set_thumbnail(url=event_data["thumbnail_url"])
+    embed.set_footer(text="点击下方的 '节日活动' 按钮加入我们！")
+    return embed
+
+
+# --- Event UI ---
+
+
+class EventButton(discord.ui.Button):
+    """活动入口按钮"""
+
+    def __init__(self):
+        super().__init__(
+            label="节日活动", style=discord.ButtonStyle.primary, emoji="🎃"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        active_event = event_service.get_active_event()
+        if not active_event:
+            await interaction.response.send_message(
+                "当前没有正在进行的活动哦。", ephemeral=True
+            )
+            return
+
+        # 创建新的活动视图
+        event_view = EventPanelView(event_data=active_event, main_shop_view=self.view)
+        # 异步创建活动 Embed
+        embed = await event_view.create_event_embed()
+        # 编辑消息，只显示活动 Embed 和活动 View
+        await interaction.response.edit_message(embeds=[embed], view=event_view)
 
 
 # --- Transfer UI ---
@@ -247,6 +289,9 @@ class SimpleShopView(discord.ui.View):
         self.add_item(RefreshBalanceButton())
         self.add_item(TransferButton())
         self.add_item(LoanButton())
+        # --- 动态添加入口 ---
+        if event_service.get_active_event():
+            self.add_item(EventButton())
 
     async def on_timeout(self):
         for item in self.children:

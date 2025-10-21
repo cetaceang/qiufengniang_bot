@@ -344,6 +344,30 @@ class ChatDatabaseManager:
                 )
                 log.info("已向 channel_chat_config 表添加 cooldown_limit 列。")
 
+            # --- 活动系统表 ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS event_faction_points (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT NOT NULL,
+                    faction_id TEXT NOT NULL,
+                    total_points INTEGER NOT NULL DEFAULT 0,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(event_id, faction_id)
+                );
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS event_contribution_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    event_id TEXT NOT NULL,
+                    faction_id TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    points_contributed INTEGER NOT NULL,
+                    transaction_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
             conn.commit()
             log.info(f"数据库表在 {self.db_path} 同步初始化成功。")
         except sqlite3.Error as e:

@@ -22,7 +22,8 @@ from google.genai import errors as genai_errors
 # 导入数据库管理器和提示词配置
 from src.chat.utils.database import chat_db_manager
 from src.chat.config import chat_config as app_config
-from src.chat.config.emoji_config import EMOJI_MAPPINGS
+from src.chat.config.emoji_config import EMOJI_MAPPINGS, FACTION_EMOJI_MAPPINGS
+from src.chat.services.event_service import event_service
 from src.chat.features.affection.service.affection_service import affection_service
 from src.chat.services.regex_service import regex_service
 from src.chat.services.prompt_service import prompt_service
@@ -263,7 +264,27 @@ class GeminiService:
         formatted = discord_emoji_pattern.sub("", formatted)
 
         # 3. Replace custom emoji placeholders
-        for pattern, emojis in EMOJI_MAPPINGS:
+        active_event = event_service.get_active_event()
+        selected_faction = event_service.get_selected_faction()
+
+        emoji_map_to_use = EMOJI_MAPPINGS  # Default to global map
+
+        if active_event and selected_faction:
+            event_id = active_event.get("event_id")
+            faction_map = FACTION_EMOJI_MAPPINGS.get(event_id, {}).get(selected_faction)
+            if faction_map:
+                log.info(
+                    f"使用事件 '{event_id}' 派系 '{selected_faction}' 的专属表情包。"
+                )
+                emoji_map_to_use = faction_map
+            else:
+                log.info(
+                    f"未找到派系 '{selected_faction}' 的专属表情包，使用全局表情包。"
+                )
+        else:
+            log.info("未使用任何派系表情包，使用全局表情包。")
+
+        for pattern, emojis in emoji_map_to_use:
             if isinstance(emojis, list) and emojis:
                 selected_emoji = random.choice(emojis)
                 formatted = pattern.sub(selected_emoji, formatted)

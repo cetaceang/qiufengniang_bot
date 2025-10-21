@@ -8,12 +8,13 @@ from src.chat.config.chat_config import (
     CONFESSION_PROMPT,
     CONFESSION_PERSONA_INJECTION,
 )
-from src.chat.config.prompts import SYSTEM_PROMPT
 from src.chat.features.affection.service.affection_service import AffectionService
 from src.chat.features.affection.service.confession_service import ConfessionService
 from src.chat.services.gemini_service import gemini_service
+from src.chat.services.prompt_service import prompt_service
 from src.chat.utils.prompt_utils import replace_emojis
 from src.config import DEVELOPER_USER_IDS
+from src.chat.services.event_service import event_service
 
 
 class ConfessionCog(commands.Cog):
@@ -58,7 +59,7 @@ class ConfessionCog(commands.Cog):
             persona_without_rules = re.sub(
                 r"<ABSOLUTE_RULES>.*?</ABSOLUTE_RULES>",
                 "",
-                SYSTEM_PROMPT,
+                prompt_service.get_prompt("SYSTEM_PROMPT"),
                 flags=re.DOTALL,
             )
             persona_without_moderation = re.sub(
@@ -133,8 +134,22 @@ class ConfessionCog(commands.Cog):
                 field_value = f"好感度 {'+' if affection_change > 0 else ''}{affection_change}\n当前好感度: {new_affection}"
                 embed.add_field(name="好感度变化", value=field_value, inline=False)
 
-            if CONFESSION_CONFIG.get("RESPONSE_IMAGE_URL"):
-                embed.set_thumbnail(url=CONFESSION_CONFIG["RESPONSE_IMAGE_URL"])
+            # --- 动态获取图片 ---
+            image_url = CONFESSION_CONFIG.get("RESPONSE_IMAGE_URL")  # 默认图片
+            selected_faction_id = event_service.get_selected_faction()
+            if selected_faction_id:
+                factions = event_service.get_event_factions()
+                if factions:
+                    for faction in factions:
+                        if faction.get("faction_id") == selected_faction_id:
+                            # 从新的 response_images 结构中获取忏悔专用的图片
+                            image_url = faction.get("response_images", {}).get(
+                                "confession", image_url
+                            )
+                            break
+
+            if image_url:
+                embed.set_thumbnail(url=image_url)
 
             embed.set_footer(text="类脑娘对你的忏悔做出了一些回应...")
 

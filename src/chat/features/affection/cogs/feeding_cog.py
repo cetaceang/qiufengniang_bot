@@ -8,10 +8,11 @@ from src.chat.features.affection.service.affection_service import AffectionServi
 from src.chat.features.affection.service.feeding_service import feeding_service
 from src.chat.features.odysseia_coin.service.coin_service import CoinService
 from src.chat.services.gemini_service import gemini_service
-from src.chat.config.prompts import SYSTEM_PROMPT
+from src.chat.services.prompt_service import prompt_service
 from src.chat.config.chat_config import FEEDING_CONFIG
 from src.chat.utils.prompt_utils import extract_persona_prompt, replace_emojis
 from src.config import DEVELOPER_USER_IDS
+from src.chat.services.event_service import event_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,9 @@ class FeedingCog(commands.Cog):
             image_bytes = await image.read()
 
             # 构建包含类脑娘人设的提示词
-            persona_part = extract_persona_prompt(SYSTEM_PROMPT)
+            persona_part = extract_persona_prompt(
+                prompt_service.get_prompt("SYSTEM_PROMPT")
+            )
             prompt = f"{persona_part}\n\n现在，请你对这张图片中的食物进行打分（1-10分），并给出一个简短的、符合你人设的评价。评价中可以包含你对食物的喜好、吐槽或俏皮话，并直接包含分数。\n在评价文本的最后，请严格按照以下格式附加上好感度和类脑币奖励，不要添加任何额外说明：<affection:好感度奖励;coins:类脑币奖励>\n例如：\n这个看起来好好吃！我给10分！<affection:+5;coins:+50>"
 
             response_text = await self.gemini_service.generate_text_with_image(
@@ -116,7 +119,20 @@ class FeedingCog(commands.Cog):
             )
 
             # 从配置中获取图片 URL
-            image_url = FEEDING_CONFIG.get("RESPONSE_IMAGE_URL")
+            # --- 动态获取图片 ---
+            image_url = FEEDING_CONFIG.get("RESPONSE_IMAGE_URL")  # 默认图片
+            selected_faction_id = event_service.get_selected_faction()
+            if selected_faction_id:
+                factions = event_service.get_event_factions()
+                if factions:
+                    for faction in factions:
+                        if faction.get("faction_id") == selected_faction_id:
+                            # 从新的 response_images 结构中获取投喂专用的图片
+                            image_url = faction.get("response_images", {}).get(
+                                "feeding", image_url
+                            )
+                            break
+
             if image_url:
                 embed.set_image(url=image_url)
 

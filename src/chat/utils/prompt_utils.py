@@ -1,16 +1,36 @@
 import re
 from src.chat.config.prompts import SYSTEM_PROMPT
-from src.chat.config.emoji_config import EMOJI_MAPPINGS
+from src.chat.config.emoji_config import EMOJI_MAPPINGS, FACTION_EMOJI_MAPPINGS
+from src.chat.services.event_service import event_service
+import logging
+
+log = logging.getLogger(__name__)
 
 
 def replace_emojis(text: str) -> str:
     """
     根据 emoji_config.py 中的映射规则，
     将文本中的自定义表情占位符（如 <微笑>）替换为对应的 Discord 自定义表情（如 <:xianhua:12345>）。
+    此函数现在会根据当前活动和派系动态选择表情包。
     """
-    for pattern, replacement_list in EMOJI_MAPPINGS:
+    active_event = event_service.get_active_event()
+    selected_faction = event_service.get_selected_faction()
+
+    emoji_map_to_use = EMOJI_MAPPINGS  # 默认使用全局映射
+
+    if active_event and selected_faction:
+        event_id = active_event.get("event_id")
+        faction_map = FACTION_EMOJI_MAPPINGS.get(event_id, {}).get(selected_faction)
+        if faction_map:
+            log.info(
+                f"prompt_utils: 使用事件 '{event_id}' 派系 '{selected_faction}' 的专属表情包。"
+            )
+            emoji_map_to_use = faction_map
+
+    for pattern, replacement_list in emoji_map_to_use:
         if replacement_list:
             # 替换内容必须是字符串，因此我们从列表中取出第一个元素
+            # 注意：对于空字符串 '' 的情况，这里会正确地移除占位符
             text = pattern.sub(replacement_list[0], text)
     return text
 

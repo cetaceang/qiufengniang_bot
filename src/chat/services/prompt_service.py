@@ -9,8 +9,9 @@ import json
 import re
 
 
-from src.chat.config.prompts import SYSTEM_PROMPT
+from src.chat.config import prompts as default_prompts
 from src.chat.config import chat_config
+from src.chat.services.event_service import event_service
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,95 @@ class PromptService:
     负责构建与大语言模型交互所需的各种复杂提示（Prompt）。
     采用分层注入式结构，动态解析并构建对话历史。
     """
+
+    def __init__(self):
+        """
+        初始化 PromptService。
+        """
+        pass
+
+    def get_prompt(self, prompt_name: str, **kwargs) -> Optional[str]:
+        """
+        获取一个格式化后的提示词。
+
+        它会首先尝试从当前激活的活动配置中查找覆盖值。
+        如果找不到，则会回退到 `src.chat.config.prompts` 模块中的默认值。
+
+        Args:
+            prompt_name: 提示词的变量名 (例如, "SYSTEM_PROMPT")。
+            **kwargs: 用于格式化提示词字符串的任何关键字参数。
+
+        Returns:
+            格式化后的提示词字符串，如果找不到则返回 None。
+        """
+        prompt_template = None
+
+        # 1. 优先检查活动覆盖
+        prompt_overrides = event_service.get_prompt_overrides()
+        log.info(
+            f"PromptService: 从 EventService 收到的提示词覆盖配置为: {prompt_overrides}"
+        )
+        active_event = event_service.get_active_event()
+        active_event_id = active_event["event_id"] if active_event else "N/A"
+
+        if prompt_overrides and prompt_name in prompt_overrides:
+            prompt_template = prompt_overrides[prompt_name]
+            log.info(
+                f"PromptService: 已为 '{prompt_name}' 应用活动 '{active_event_id}' 的提示词覆盖。"
+            )
+        else:
+            # 2. 如果没有覆盖，则执行回退逻辑
+            if prompt_name == "SYSTEM_PROMPT":
+                # 2.1. 对 SYSTEM_PROMPT 的特殊处理
+                base_template = getattr(default_prompts, "SYSTEM_PROMPT", "")
+                if not base_template:
+                    log.error("默认的 SYSTEM_PROMPT 未找到！")
+                    return None
+
+                faction_pack_content = (
+                    event_service.get_system_prompt_faction_pack_content()
+                )
+                if faction_pack_content:
+                    tag_overrides = dict(
+                        re.findall(
+                            r"<(\w+)>(.*?)</\1>", faction_pack_content, re.DOTALL
+                        )
+                    )
+                    modified_template = base_template
+                    for tag, content in tag_overrides.items():
+                        replacement = f"<{tag}>{content}</{tag}>"
+                        pattern = re.compile(f"<{tag}>.*?</{tag}>", re.DOTALL)
+                        if pattern.search(modified_template):
+                            modified_template = pattern.sub(
+                                replacement, modified_template
+                            )
+                            log.debug(
+                                f"已为 SYSTEM_PROMPT 应用派系包中的标签 '{tag}' 覆盖。"
+                            )
+                        else:
+                            log.warning(
+                                f"在 SYSTEM_PROMPT 中未找到用于覆盖的标签: <{tag}>"
+                            )
+                    prompt_template = modified_template
+                else:
+                    prompt_template = base_template
+            else:
+                # 2.2. 对其他提示词的通用处理
+                if hasattr(default_prompts, prompt_name):
+                    prompt_template = getattr(default_prompts, prompt_name)
+                else:
+                    log.warning(f"提示词 '{prompt_name}' 在任何地方都找不到。")
+                    return None
+
+        # 3. 使用提供的参数格式化提示词
+        if kwargs and prompt_template:
+            try:
+                return prompt_template.format(**kwargs)
+            except KeyError as e:
+                log.error(f"格式化提示词 '{prompt_name}' 时缺少参数: {e}")
+                return prompt_template
+
+        return prompt_template
 
     def build_chat_prompt(
         self,
@@ -64,7 +154,7 @@ class PromptService:
         beijing_tz = timezone(timedelta(hours=8))
         current_beijing_time = datetime.now(beijing_tz).strftime("%Y年%m月%d日 %H:%M")
         # 动态知识块（世界之书、个人记忆）将作为独立消息注入，无需在此处处理占位符
-        core_prompt_template = SYSTEM_PROMPT
+        core_prompt_template = self.get_prompt("SYSTEM_PROMPT")
 
         # 填充核心提示词
         core_prompt = core_prompt_template
