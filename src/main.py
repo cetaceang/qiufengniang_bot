@@ -19,8 +19,8 @@ from src import config
 from src.guidance.utils.database import guidance_db_manager
 from src.chat.utils.database import chat_db_manager
 from src.chat.features.world_book.database.world_book_db_manager import world_book_db_manager
-# 导入全局 gemini_service 实例
-from src.chat.services.gemini_service import gemini_service
+# 导入全局 ai_service 实例（支持 Gemini 和 OpenAI 路由）
+from src.chat.services.gemini_service import ai_service, gemini_service
 
 current_script_path = os.path.abspath(__file__)
 current_dir = os.path.dirname(current_script_path)
@@ -325,9 +325,9 @@ async def main():
     # 4. 创建并运行机器人实例
     bot = GuidanceBot()
     guidance_db_manager.set_bot_instance(bot)
-    # 在机器人启动时，将 bot 实例注入到 GeminiService 中
+    # 在机器人启动时，将 bot 实例注入到 AI Service 中
     # 这是确保工具能够访问 Discord API 的关键步骤
-    gemini_service.set_bot(bot)
+    ai_service.set_bot(bot)
     
     token = os.getenv("DISCORD_TOKEN")
     if not token:

@@ -5,7 +5,7 @@ import logging
 from typing import Dict, Any
 
 # 导入所需的服务
-from src.chat.services.gemini_service import gemini_service
+from src.chat.services.gemini_service import ai_service
 from src.chat.services.context_service_test import context_service_test  # 导入测试服务
 from src.chat.features.world_book.services.world_book_service import world_book_service
 from src.chat.features.affection.service.affection_service import affection_service
@@ -216,7 +216,7 @@ class ChatService:
             if DEBUG_CONFIG["LOG_FINAL_CONTEXT"]:
                 log.info(f"发送给AI -> 最终上下文: {channel_context}")
 
-            ai_response = await gemini_service.generate_response(
+            ai_response = await ai_service.generate_response(
                 author.id,
                 guild_id,
                 message=user_content,

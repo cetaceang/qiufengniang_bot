@@ -22,8 +22,8 @@ SUMMARY_MODEL = "gemini-2.5-flash-lite"
 QUERY_REWRITING_MODEL = "gemini-2.5-flash-lite"
 
 # --- OpenAI 配置 ---
-# 定义要使用的 OpenAI 模型名称
-OPENAI_MODEL = "gpt-4o"
+# 定义要使用的 OpenAI 模型名称（可通过环境变量覆盖）
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 
 # OpenAI 聊天配置
 OPENAI_CHAT_CONFIG = {
