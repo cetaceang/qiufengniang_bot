@@ -21,6 +21,16 @@ SUMMARY_MODEL = "gemini-2.5-flash-lite"
 # 用于查询重写的模型。通常可以使用一个更小、更快的模型来降低成本和延迟。
 QUERY_REWRITING_MODEL = "gemini-2.5-flash-lite"
 
+# --- OpenAI 配置 ---
+# 定义要使用的 OpenAI 模型名称
+OPENAI_MODEL = "gpt-4o"
+
+# OpenAI 聊天配置
+OPENAI_CHAT_CONFIG = {
+    "temperature": 1.1,
+    "max_tokens": 3000,
+}
+
 
 # --- Gemini Service 配置 ---
 GEMINI_CHAT_CONFIG = {

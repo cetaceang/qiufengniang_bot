@@ -1047,3 +1047,17 @@ class GeminiService:
 
 # 全局实例
 gemini_service = GeminiService()
+
+# --- OpenAI 支持 ---
+# 导入 OpenAI 服务和路由器
+try:
+    from src.chat.services.openai_service import openai_service
+    from src.chat.services.ai_service_router import AIServiceRouter
+
+    # 创建路由器实例，替代原有的 gemini_service
+    ai_service = AIServiceRouter(gemini_service, openai_service)
+    log.info("AI 服务路由器初始化成功")
+except Exception as e:
+    log.warning(f"无法初始化 OpenAI 服务，将仅使用 Gemini: {e}")
+    # 如果 OpenAI 初始化失败，ai_service 指向 gemini_service
+    ai_service = gemini_service
