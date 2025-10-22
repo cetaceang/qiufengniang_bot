@@ -279,5 +279,7 @@ stats_thread.start()
 # --- 启动入口 ---
 if __name__ == '__main__':
     web_app.logger.info("Flask app is starting.")
+    # 从环境变量读取端口，如果未设置则默认为 8001
+    port = int(os.getenv("CONFIG_WEB_PORT", 8001))
     # 启动后台线程
-    web_app.run(host='0.0.0.0', port=80, debug=True)
+    web_app.run(host='0.0.0.0', port=port, debug=True)
