@@ -5,9 +5,12 @@ import logging
 from typing import Optional, Dict, List, Any
 import asyncio
 import json
+import base64
+import io
 
 from openai import AsyncOpenAI
 from openai import APIError, RateLimitError, APIConnectionError
+from PIL import Image
 
 from src.chat.config import chat_config as app_config
 from src.chat.features.tools.tool_registry import tool_registry
@@ -86,18 +89,37 @@ class OpenAIService:
             if role == "model":
                 role = "assistant"
 
-            # 处理内容
+            # 处理内容（支持文本和图片）
             content = []
             for part in parts:
                 if isinstance(part, str):
                     content.append({"type": "text", "text": part})
-                # 注意: OpenAI 图片处理需要特殊格式，这里暂时只处理文本
+                elif isinstance(part, Image.Image):
+                    # 将 PIL.Image 转换为 base64
+                    buffered = io.BytesIO()
+                    part.save(buffered, format="PNG")
+                    img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{img_base64}"
+                        }
+                    })
 
             if content:
-                messages.append({
-                    "role": role,
-                    "content": content if len(content) > 1 else content[0]["text"]
-                })
+                # 如果只有一个文本部分，直接使用字符串；否则使用列表格式
+                if len(content) == 1 and content[0].get("type") == "text":
+                    messages.append({
+                        "role": role,
+                        "content": content[0]["text"]
+                    })
+                else:
+                    # 包含图片或多个部分时，使用列表格式
+                    messages.append({
+                        "role": role,
+                        "content": content
+                    })
 
         return messages
 
